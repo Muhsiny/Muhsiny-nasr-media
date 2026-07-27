@@ -1,0 +1,11 @@
+name = "nasr-media-api"
+main = "src/index.js"
+compatibility_date = "2026-07-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nasr-media-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[vars]
+PUBLIC_SITE_NAME = "NASR MEDIA"
