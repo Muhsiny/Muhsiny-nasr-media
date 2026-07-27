@@ -1,0 +1,13 @@
+{
+  "name": "nasr-media-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply nasr-media-db --remote"
+  },
+  "dependencies": {
+    "wrangler": "^3.99.0"
+  }
+}
