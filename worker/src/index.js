@@ -1,0 +1,54 @@
+const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Methods":"GET,POST,PATCH,DELETE,OPTIONS","Access-Control-Allow-Headers":"content-type,authorization"};
+const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...cors,"content-type":"application/json;charset=UTF-8"}});
+const agents=[
+ {key:'rasad',name:'رصد',stage:1,task:'جمع‌آوری منابع'},
+ {key:'palayesh',name:'پالایش',stage:2,task:'حذف تکرار و محتوای ضعیف'},
+ {key:'mizan',name:'میزان',stage:3,task:'راستی‌آزمایی و امتیاز اعتبار'},
+ {key:'nabz',name:'نبض',stage:4,task:'خلاصه‌سازی و استخراج نکات'},
+ {key:'basir',name:'بصیر',stage:5,task:'تحلیل زمینه و پیامدها'},
+ {key:'dabir',name:'دبیر',stage:6,task:'تیتر، لید و بازنویسی'},
+ {key:'lesan',name:'لسان',stage:7,task:'ترجمه هفت‌زبانه'},
+ {key:'nashr',name:'نشر',stage:8,task:'کنترل نهایی و ارجاع انسانی'}
+];
+const slugify=s=>s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'-').replace(/(^-|-$)/g,'');
+async function body(req){try{return await req.json()}catch{return {}}}
+export default{async fetch(request,env){
+ const url=new URL(request.url); if(request.method==='OPTIONS')return new Response(null,{headers:cors});
+ if(url.pathname==='/api/health')return json({ok:true,service:'NASR MEDIA API',time:new Date().toISOString()});
+ if(url.pathname==='/api/agents')return json({agents});
+ if(url.pathname==='/api/articles'&&request.method==='GET'){
+  const status=url.searchParams.get('status'); const language=url.searchParams.get('language');
+  let sql='SELECT id,slug,status,language,title,summary,category,confidence_score,published_at,created_at FROM articles WHERE 1=1'; const args=[];
+  if(status){sql+=' AND status=?';args.push(status)} if(language){sql+=' AND language=?';args.push(language)} sql+=' ORDER BY created_at DESC LIMIT 100';
+  const rows=await env.DB.prepare(sql).bind(...args).all(); return json(rows.results);
+ }
+ if(url.pathname==='/api/articles'&&request.method==='POST'){
+  const b=await body(request); if(!b.title)return json({error:'title_required'},400);
+  const id=crypto.randomUUID(),slug=slugify(b.slug||b.title);
+  await env.DB.prepare("INSERT INTO articles(id,slug,status,language,title,summary,body,category,confidence_score,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))")
+   .bind(id,slug,'draft',b.language||'fa',b.title,b.summary||'',b.body||'',b.category||'general',0).run();
+  for(const a of agents)await env.DB.prepare("INSERT INTO pipeline_runs(id,article_id,stage,agent_key,status,created_at) VALUES(?,?,?,?,?,datetime('now'))").bind(crypto.randomUUID(),id,a.stage,a.key,'queued').run();
+  return json({id,slug,status:'draft'},201);
+ }
+ const articleMatch=url.pathname.match(/^\/api\/articles\/([^/]+)$/);
+ if(articleMatch&&request.method==='GET'){
+  const row=await env.DB.prepare('SELECT * FROM articles WHERE id=? OR slug=?').bind(articleMatch[1],articleMatch[1]).first(); return row?json(row):json({error:'not_found'},404);
+ }
+ if(articleMatch&&request.method==='PATCH'){
+  const b=await body(request); const current=await env.DB.prepare('SELECT * FROM articles WHERE id=?').bind(articleMatch[1]).first(); if(!current)return json({error:'not_found'},404);
+  await env.DB.prepare("INSERT INTO revisions(id,article_id,snapshot_json,reason,created_at) VALUES(?,?,?,?,datetime('now'))").bind(crypto.randomUUID(),current.id,JSON.stringify(current),b.reason||'editor_update').run();
+  await env.DB.prepare("UPDATE articles SET title=?,summary=?,body=?,category=?,language=?,updated_at=datetime('now') WHERE id=?").bind(b.title??current.title,b.summary??current.summary,b.body??current.body,b.category??current.category,b.language??current.language,current.id).run();
+  return json({ok:true});
+ }
+ if(url.pathname==='/api/approvals'&&request.method==='POST'){
+  const b=await body(request); if(!b.articleId||!['approved','rejected','changes_requested'].includes(b.decision))return json({error:'invalid_approval'},400);
+  await env.DB.prepare("INSERT INTO approvals(id,article_id,reviewer_id,decision,note,created_at) VALUES(?,?,?,?,?,datetime('now'))").bind(crypto.randomUUID(),b.articleId,b.reviewerId||null,b.decision,b.note||'').run();
+  const next=b.decision==='approved'?'published':b.decision==='rejected'?'rejected':'changes_requested';
+  await env.DB.prepare("UPDATE articles SET status=?,published_at=CASE WHEN ?='published' THEN datetime('now') ELSE published_at END,updated_at=datetime('now') WHERE id=?").bind(next,next,b.articleId).run(); return json({ok:true,status:next});
+ }
+ if(url.pathname==='/api/pipeline'&&request.method==='GET'){
+  const articleId=url.searchParams.get('articleId'); if(!articleId)return json({error:'articleId_required'},400);
+  const rows=await env.DB.prepare('SELECT * FROM pipeline_runs WHERE article_id=? ORDER BY stage').bind(articleId).all(); return json(rows.results);
+ }
+ return json({error:'not_found'},404);
+}};
