@@ -2,6 +2,9 @@ name = "nasr-media-api"
 main = "src/index.js"
 compatibility_date = "2026-07-01"
 
+[triggers]
+crons = ["*/15 * * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "nasr-media-db"
@@ -9,3 +12,5 @@ database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
 [vars]
 PUBLIC_SITE_NAME = "NASR MEDIA"
+AUTO_PUBLISH = "true"
+AUTO_PUBLISH_MIN_TRUST = "70"
