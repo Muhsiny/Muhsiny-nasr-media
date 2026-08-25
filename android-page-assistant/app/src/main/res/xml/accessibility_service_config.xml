@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:description="@string/accessibility_service_description"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewFocused|typeViewClicked"
-    android:accessibilityFeedbackType="feedbackGeneric"
-    android:notificationTimeout="150"
-    android:canRetrieveWindowContent="true"
-    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
-    android:packageNames="com.facebook.katana,com.android.chrome,com.sec.android.app.sbrowser,org.mozilla.firefox,com.opera.browser" />
