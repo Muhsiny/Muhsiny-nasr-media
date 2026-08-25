@@ -6,9 +6,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
-import android.net.Uri;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -31,7 +29,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        setTitle("Media Page Assistant");
+        setTitle("Media Page Workspace");
         setContentView(buildUi());
         refresh();
     }
@@ -49,10 +47,10 @@ public class MainActivity extends Activity {
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         scroll.addView(root);
 
-        TextView title = text("Media Page Assistant", 25, true);
+        TextView title = text("Media Page Workspace", 25, true);
         title.setTextColor(Color.rgb(20, 88, 61));
         root.addView(title);
-        root.addView(text("دستیار محلی ساخت صفحه: اطلاعات طرح را در رابط واقعی Facebook تکمیل می‌کند. مرحلهٔ نهایی Create را خودت تأیید می‌کنی و برنامه هیچ چالش یا محدودیتی را دور نمی‌زند.", 14, false));
+        root.addView(text("نسخه بدون Accessibility: Facebook داخل مرورگر امن خود برنامه باز می‌شود و فرم مورد فعلی از همان‌جا تکمیل می‌شود. برنامه هیچ دسترسی به پیام‌ها، فایل‌ها، مخاطبین یا صفحهٔ سایر برنامه‌ها نمی‌خواهد.", 14, false));
 
         statusView = text("", 14, true);
         statusView.setPadding(0, dp(12), 0, dp(12));
@@ -78,20 +76,15 @@ public class MainActivity extends Activity {
         save.setOnClickListener(v -> saveQueue());
         root.addView(save);
 
-        root.addView(section("۲) فعال‌سازی عامل محلی"));
-        Button access = button("بازکردن تنظیمات Accessibility");
-        access.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        root.addView(access);
-
-        root.addView(section("۳) اجرای مورد بعدی"));
-        Button start = button("شروع مورد بعدی در Facebook");
-        start.setOnClickListener(v -> startNext());
-        root.addView(start);
+        root.addView(section("۲) کار با Facebook"));
+        Button browser = button("بازکردن محیط Facebook داخل برنامه");
+        browser.setOnClickListener(v -> startBrowser());
+        root.addView(browser);
         Button copy = button("کپی نام و معرفی مورد فعلی");
         copy.setOnClickListener(v -> copyCurrent());
         root.addView(copy);
-        Button confirm = button("این صفحه واقعاً ساخته شد");
-        confirm.setOnClickListener(v -> { PlanStore.advance(this); Toast.makeText(this, "ثبت شد؛ مورد بعدی آماده است.", Toast.LENGTH_SHORT).show(); refresh(); });
+        Button confirm = button("این صفحه واقعاً ساخته شد → مورد بعدی");
+        confirm.setOnClickListener(v -> { PlanStore.advance(this); toast("ثبت شد؛ مورد بعدی آماده است."); refresh(); });
         root.addView(confirm);
         Button reset = button("بازگشت صف به ابتدا");
         reset.setOnClickListener(v -> { PlanStore.reset(this); refresh(); });
@@ -132,14 +125,11 @@ public class MainActivity extends Activity {
         refresh();
     }
 
-    private void startNext() {
+    private void startBrowser() {
         PlanStore.Plan plan = PlanStore.current(this);
-        if (plan == null) { toast("صف خالی است یا تمام شده."); return; }
-        PlanStore.setActive(this, true);
-        PlanStore.setStatus(this, "در انتظار بازشدن فرم Facebook: " + plan.name);
-        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.facebook.com/pages/creation/"));
-        startActivity(i);
-        refresh();
+        if (plan == null) { toast("اول صف را بساز و ذخیره کن."); return; }
+        PlanStore.setStatus(this, "محیط Facebook برای " + plan.name + " آماده است.");
+        startActivity(new Intent(this, BrowserActivity.class));
     }
 
     private void copyCurrent() {
