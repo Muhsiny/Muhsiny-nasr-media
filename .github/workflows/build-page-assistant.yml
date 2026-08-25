@@ -29,14 +29,29 @@ jobs:
         uses: android-actions/setup-android@v3
       - name: Install Android platform
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - name: Build debug APK
+      - name: Create release signing key
+        run: keytool -genkeypair -v -keystore "$RUNNER_TEMP/media-page-assistant.jks" -storepass 'MediaPage2026!' -keypass 'MediaPage2026!' -alias media-page -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=Media Page Assistant, OU=Media Network, O=Media Network, L=Kabul, C=AF'
+      - name: Build signed release APK
         working-directory: android-page-assistant
-        run: gradle assembleDebug --stacktrace
+        env:
+          MPA_KEYSTORE: ${{ runner.temp }}/media-page-assistant.jks
+          MPA_STORE_PASS: MediaPage2026!
+          MPA_KEY_ALIAS: media-page
+          MPA_KEY_PASS: MediaPage2026!
+        run: gradle assembleRelease --stacktrace
+      - name: Verify APK structure and signature
+        run: |
+          APK='android-page-assistant/app/build/outputs/apk/release/app-release.apk'
+          test -s "$APK"
+          unzip -t "$APK"
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs "$APK"
+          $ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer manifest min-sdk "$APK"
+          $ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer manifest target-sdk "$APK"
       - name: Prepare artifact
-        run: cp android-page-assistant/app/build/outputs/apk/debug/app-debug.apk Media-Page-Assistant.apk
+        run: cp android-page-assistant/app/build/outputs/apk/release/app-release.apk Media-Page-Assistant-Android11.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Media-Page-Assistant-APK
-          path: Media-Page-Assistant.apk
+          name: Media-Page-Assistant-Android11-APK
+          path: Media-Page-Assistant-Android11.apk
           if-no-files-found: error
