@@ -59,9 +59,9 @@ public class MainActivity extends Activity {
         root.addView(statusView);
 
         root.addView(section("۱) ساخت صف"));
-        countBox = input("تعداد طرح در این نوبت (۱ تا ۲۰)");
+        countBox = input("تعداد طرح در این نوبت (۱ تا ۵۰۰)");
         countBox.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        countBox.setText("5");
+        countBox.setText("20");
         root.addView(countBox);
         categoryBox = input("دسته Facebook");
         categoryBox.setText("News & media website");
@@ -100,15 +100,18 @@ public class MainActivity extends Activity {
     }
 
     private void generatePlans() {
-        int n = 5;
+        int n = 20;
         try { n = Integer.parseInt(countBox.getText().toString().trim()); } catch (Exception ignored) {}
-        n = Math.max(1, Math.min(20, n));
+        n = Math.max(1, Math.min(500, n));
         String category = categoryBox.getText().toString().trim();
         if (category.isEmpty()) category = "News & media website";
-        long seed = System.currentTimeMillis();
+        int totalCombos = first.length * second.length;
+        int start = (int) (System.currentTimeMillis() % totalCombos);
+        int step = 37;
         StringBuilder b = new StringBuilder();
         for (int i = 0; i < n; i++) {
-            String name = first[(int)((seed + i * 7) % first.length)] + " " + second[(int)((seed / 3 + i * 11) % second.length)];
+            int combo = (start + i * step) % totalCombos;
+            String name = first[combo / second.length] + " " + second[combo % second.length];
             String bio = "رسانه مستقل با تمرکز بر خبر، جامعه و روایت رویدادها.";
             if (b.length() > 0) b.append('\n');
             b.append(name).append(" | ").append(category).append(" | ").append(bio);
