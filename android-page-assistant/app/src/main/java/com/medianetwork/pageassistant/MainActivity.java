@@ -1,11 +1,13 @@
 package com.medianetwork.pageassistant;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -50,7 +52,7 @@ public class MainActivity extends Activity {
         TextView title = text("Media Page Workspace", 25, true);
         title.setTextColor(Color.rgb(20, 88, 61));
         root.addView(title);
-        root.addView(text("نسخه بدون Accessibility: Facebook داخل مرورگر امن خود برنامه باز می‌شود و فرم مورد فعلی از همان‌جا تکمیل می‌شود. برنامه هیچ دسترسی به پیام‌ها، فایل‌ها، مخاطبین یا صفحهٔ سایر برنامه‌ها نمی‌خواهد.", 14, false));
+        root.addView(text("Facebook دیگر داخل برنامه لاگین نمی‌شود. صفحهٔ ساخت در Facebook اصلیِ نصب‌شده باز می‌شود و اگر در دسترس نباشد در Chrome اصلی باز خواهد شد تا همان نشست شناخته‌شدهٔ حساب تو استفاده شود.", 14, false));
 
         statusView = text("", 14, true);
         statusView.setPadding(0, dp(12), 0, dp(12));
@@ -76,16 +78,35 @@ public class MainActivity extends Activity {
         save.setOnClickListener(v -> saveQueue());
         root.addView(save);
 
-        root.addView(section("۲) کار با Facebook"));
-        Button browser = button("بازکردن محیط Facebook داخل برنامه");
-        browser.setOnClickListener(v -> startBrowser());
-        root.addView(browser);
-        Button copy = button("کپی نام و معرفی مورد فعلی");
-        copy.setOnClickListener(v -> copyCurrent());
-        root.addView(copy);
+        root.addView(section("۲) ساخت در Facebook اصلی"));
+        Button open = button("بازکردن ساخت صفحه در Facebook اصلی");
+        open.setOnClickListener(v -> openTrustedFacebook());
+        root.addView(open);
+
+        Button copyName = button("کپی نام مورد فعلی");
+        copyName.setOnClickListener(v -> copyField("name"));
+        root.addView(copyName);
+
+        Button copyCategory = button("کپی دسته مورد فعلی");
+        copyCategory.setOnClickListener(v -> copyField("category"));
+        root.addView(copyCategory);
+
+        Button copyBio = button("کپی معرفی مورد فعلی");
+        copyBio.setOnClickListener(v -> copyField("bio"));
+        root.addView(copyBio);
+
+        Button copyAll = button("کپی همه مشخصات");
+        copyAll.setOnClickListener(v -> copyField("all"));
+        root.addView(copyAll);
+
         Button confirm = button("این صفحه واقعاً ساخته شد → مورد بعدی");
-        confirm.setOnClickListener(v -> { PlanStore.advance(this); toast("ثبت شد؛ مورد بعدی آماده است."); refresh(); });
+        confirm.setOnClickListener(v -> {
+            PlanStore.advance(this);
+            toast("ثبت شد؛ مورد بعدی آماده است.");
+            refresh();
+        });
         root.addView(confirm);
+
         Button reset = button("بازگشت صف به ابتدا");
         reset.setOnClickListener(v -> { PlanStore.reset(this); refresh(); });
         root.addView(reset);
@@ -125,19 +146,67 @@ public class MainActivity extends Activity {
         refresh();
     }
 
-    private void startBrowser() {
-        PlanStore.Plan plan = PlanStore.current(this);
-        if (plan == null) { toast("اول صف را بساز و ذخیره کن."); return; }
-        PlanStore.setStatus(this, "محیط Facebook برای " + plan.name + " آماده است.");
-        startActivity(new Intent(this, BrowserActivity.class));
+    private void openTrustedFacebook() {
+        PlanStore.Plan p = PlanStore.current(this);
+        if (p == null) { toast("اول صف را بساز و ذخیره کن."); return; }
+
+        // Put the page name on the clipboard before leaving the app, so the first field is ready to paste.
+        putClipboard("page-name", p.name);
+        Uri createUri = Uri.parse("https://www.facebook.com/pages/creation/");
+
+        Intent fb = new Intent(Intent.ACTION_VIEW, createUri);
+        fb.addCategory(Intent.CATEGORY_BROWSABLE);
+        fb.setPackage("com.facebook.katana");
+        try {
+            startActivity(fb);
+            PlanStore.setStatus(this, "Facebook اصلی باز شد؛ نام «" + p.name + "» در کلیپ‌بورد آماده است.");
+            return;
+        } catch (ActivityNotFoundException ignored) {}
+
+        Intent chrome = new Intent(Intent.ACTION_VIEW, createUri);
+        chrome.addCategory(Intent.CATEGORY_BROWSABLE);
+        chrome.setPackage("com.android.chrome");
+        try {
+            startActivity(chrome);
+            PlanStore.setStatus(this, "Chrome اصلی باز شد؛ نام «" + p.name + "» در کلیپ‌بورد آماده است.");
+            return;
+        } catch (ActivityNotFoundException ignored) {}
+
+        Intent browser = new Intent(Intent.ACTION_VIEW, createUri);
+        browser.addCategory(Intent.CATEGORY_BROWSABLE);
+        try {
+            startActivity(browser);
+            PlanStore.setStatus(this, "مرورگر اصلی دستگاه باز شد؛ نام مورد فعلی در کلیپ‌بورد آماده است.");
+        } catch (ActivityNotFoundException e) {
+            toast("Facebook یا مرورگر قابل استفاده پیدا نشد.");
+        }
     }
 
-    private void copyCurrent() {
+    private void copyField(String which) {
         PlanStore.Plan p = PlanStore.current(this);
         if (p == null) { toast("مورد فعالی وجود ندارد."); return; }
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("page-plan", p.name + "\n" + p.category + "\n" + p.bio));
+        String label;
+        String value;
+        if ("name".equals(which)) {
+            label = "page-name";
+            value = p.name;
+        } else if ("category".equals(which)) {
+            label = "page-category";
+            value = p.category;
+        } else if ("bio".equals(which)) {
+            label = "page-bio";
+            value = p.bio;
+        } else {
+            label = "page-plan";
+            value = p.name + "\n" + p.category + "\n" + p.bio;
+        }
+        putClipboard(label, value);
         toast("کپی شد.");
+    }
+
+    private void putClipboard(String label, String value) {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(ClipData.newPlainText(label, value));
     }
 
     private void refresh() {
