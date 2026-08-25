@@ -8,9 +8,30 @@ android {
 
     defaultConfig {
         applicationId 'com.medianetwork.pageassistant'
-        minSdk 23
-        targetSdk 35
-        versionCode 1
-        versionName '1.0'
+        minSdk 21
+        targetSdk 30
+        versionCode 2
+        versionName '1.1'
+    }
+
+    signingConfigs {
+        release {
+            def ks = System.getenv('MPA_KEYSTORE')
+            if (ks != null) {
+                storeFile file(ks)
+                storePassword System.getenv('MPA_STORE_PASS')
+                keyAlias System.getenv('MPA_KEY_ALIAS')
+                keyPassword System.getenv('MPA_KEY_PASS')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            debuggable false
+            if (System.getenv('MPA_KEYSTORE') != null) signingConfig signingConfigs.release
+        }
     }
 }
