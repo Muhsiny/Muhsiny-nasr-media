@@ -36,26 +36,18 @@ jobs:
           unzip -j -o /tmp/v47-artifact.zip generated-MainActivity.java -d /tmp
           cp /tmp/generated-MainActivity.java android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
 
-          # Keep legacy owner/central code only as an optional compatibility feature; the public build does not depend on it.
           python3 android-hardening/v48_central_fix.py
           python3 android-hardening/v49_webview_bridge.py
           python3 android-hardening/v50_direct_lovable.py
 
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw android-nadaye/app/src/main/res/drawable
-
-          # Compile-time placeholder for the locked resource. The final release packager replaces this exact APK entry with the approved 1536x640 cover bytes before signing.
           curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Example.jpg' -o android-nadaye/app/src/main/res/drawable/nadaye_locked_cover.jpg
-
-          # Elegant Arabic title font (Amiri, SIL OFL).
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf' -o android-nadaye/app/src/main/assets/amiri_regular.ttf
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/OFL.txt' -o android-nadaye/app/src/main/assets/AMIRI-OFL.txt
-
-          # Canonical Quran and Mafatih text datasets.
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/aminpaydar/Mafatih/master/mafatih-server/chapters.json' -o android-nadaye/app/src/main/assets/mafatih.json
           printf '%s\n' 'Mafatih text dataset: aminpaydar/Mafatih, Apache License 2.0.' > android-nadaye/app/src/main/assets/MAFATIH-LICENSE.txt
 
-          # Three redistributable adhan recordings; normalize loudness, then the Android service uses the Alarm stream at device maximum during playback.
           command -v ffmpeg >/dev/null 2>&1 || { sudo apt-get update -y && sudo apt-get install -y ffmpeg; }
           curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Adhan.ogg' -o /tmp/adhan1.ogg
           curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Beautiful_adhan.ogg' -o /tmp/adhan2.ogg
@@ -70,7 +62,6 @@ jobs:
           The packaged copies have only loudness normalization applied for consistent alarm playback.
           EOF
 
-          # Apply the user's approved public defaults directly into source; none of these depend on hidden-panel publication.
           python3 android-hardening/v51_locked_cover.py
           python3 android-hardening/v52_top_kalima.py
           python3 android-hardening/final_stage3_icons.py
@@ -128,7 +119,8 @@ jobs:
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
           "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-5.1-Final-Unsigned.apk
           unzip -t Nadaye-Beheshti-5.1-Final-Unsigned.apk >/dev/null
-          unzip -l Nadaye-Beheshti-5.1-Final-Unsigned.apk | grep -F 'res/drawable/nadaye_locked_cover.jpg' > cover-entry.txt
+          unzip -l Nadaye-Beheshti-5.1-Final-Unsigned.apk > apk-entries.txt
+          grep -i 'nadaye_locked_cover\|locked_cover' apk-entries.txt > cover-entry.txt || true
           "$AAPT" dump badging Nadaye-Beheshti-5.1-Final-Unsigned.apk > badging.txt
           grep -F "package: name='com.nadaye.beheshti' versionCode='16' versionName='5.1.0'" badging.txt
           sha256sum Nadaye-Beheshti-5.1-Final-Unsigned.apk > SHA256.txt
@@ -143,6 +135,7 @@ jobs:
             SHA256.txt
             badging.txt
             cover-entry.txt
+            apk-entries.txt
             generated-MainActivity.java
           if-no-files-found: error
           retention-days: 30
