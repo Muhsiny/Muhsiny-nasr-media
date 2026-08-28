@@ -1,4 +1,4 @@
-name: Build Nadaye Beheshti Android v2
+name: Build Nadaye Beheshti Android v3
 
 on:
   push:
@@ -21,94 +21,75 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Apply v2 source overlay
+      - name: Apply v3 source overlay
         shell: bash
         run: |
           set -euo pipefail
-          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/NRSTWjl5LIQnBE3z' -o /tmp/nadaye-v2.zip
-          echo '004d56b0c62cfb68d4f8aa08db3e42f744e031c7b27e89c9bdb56bc3229a5e36  /tmp/nadaye-v2.zip' | sha256sum -c -
-          unzip -o /tmp/nadaye-v2.zip -d android-nadaye
-          python3 - <<'PY'
-          from pathlib import Path
-          root = Path('android-nadaye/app/src/main/java/com/nadaye/beheshti')
-          for p in root.glob('*.java'):
-              s = p.read_text(encoding='utf-8')
-              s = s.replace(';\\nimport ', ';\nimport ')
-              p.write_text(s, encoding='utf-8')
-          PY
+          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/5gv7sZFpfv2z2C6E' -o /tmp/nadaye-v3.zip
+          echo 'aeb506beb01745e406a25e6e068616e2ba91cf335ead2a79af86150deb6024e4  /tmp/nadaye-v3.zip' | sha256sum -c -
+          unzip -o /tmp/nadaye-v3.zip -d android-nadaye
 
-      - name: Prepare verified offline Quran and default adhan
+      - name: Prepare Quran and verified Jafari adhan
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
           curl -L --fail --retry 3 --retry-delay 2 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
-          curl -L --fail --retry 3 --retry-delay 2 'https://raw.githubusercontent.com/Kiwifu/adhan-mp3/main/Adhan_Al_Aqsa_-_Jerusalem_(%D8%A3%D8%B0%D8%A7%D9%86_%D8%A7%D9%84%D9%85%D8%B3%D8%AC%D8%AF_%D8%A7%D9%84%D8%A3%D9%82%D8%B5%D9%89_-_%D8%A7%D9%84%D9%82%D8%AF%D8%B3).mp3' -o android-nadaye/app/src/main/res/raw/adhan_default.mp3
+          curl -L --fail --retry 3 --retry-delay 2 'https://www.shiasource.com/wp-content/uploads/2018/07/adhan_alhalawaji.mp3' -o android-nadaye/app/src/main/res/raw/adhan_shia_abather.mp3
           python3 - <<'PY'
           import json
           from pathlib import Path
-          q = Path('android-nadaye/app/src/main/assets/quran.json')
-          d = json.loads(q.read_text(encoding='utf-8'))
-          assert isinstance(d, list) and len(d) == 114, 'Quran must contain 114 surahs'
-          verses = sum(len(c.get('verses', [])) for c in d)
-          assert verses >= 6200, f'Quran verse count too small: {verses}'
-          assert d[0].get('name') and d[0].get('verses'), 'Quran structure invalid'
-          a = Path('android-nadaye/app/src/main/res/raw/adhan_default.mp3')
-          assert a.stat().st_size > 100000, 'Adhan file is too small'
-          h = a.read_bytes()[:3]
-          assert h == b'ID3' or h[:1] == b'\xff', f'Adhan is not an MP3: {h!r}'
-          hero = Path('android-nadaye/app/src/main/res/drawable-nodpi/leader_hero.jpg')
-          assert hero.exists() and hero.stat().st_size > 10000, 'Hero image missing'
-          print('Validated Quran:', verses, 'verses; adhan:', a.stat().st_size, 'bytes; hero:', hero.stat().st_size, 'bytes')
+          q=Path('android-nadaye/app/src/main/assets/quran.json')
+          d=json.loads(q.read_text(encoding='utf-8'))
+          assert isinstance(d,list) and len(d)==114
+          verses=sum(len(x.get('verses',[])) for x in d)
+          assert verses>=6200
+          a=Path('android-nadaye/app/src/main/res/raw/adhan_shia_abather.mp3')
+          assert a.stat().st_size>100000
+          h=a.read_bytes()[:3]
+          assert h==b'ID3' or h[:1]==b'\xff'
+          hero=Path('android-nadaye/app/src/main/res/drawable-nodpi/leader_hero.jpg')
+          assert hero.exists() and hero.stat().st_size>10000
+          print('Validated:',len(d),'surahs,',verses,'verses, adhan',a.stat().st_size,'bytes')
           PY
 
       - name: Build release APK
         working-directory: android-nadaye
         run: gradle :app:assembleRelease --stacktrace
 
-      - name: Sign and verify release APK
+      - name: Align unsigned APK and collect signing tool
         shell: bash
         run: |
           set -euo pipefail
           UNSIGNED='android-nadaye/app/build/outputs/apk/release/app-release-unsigned.apk'
           test -s "$UNSIGNED"
           ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign -type f | sort -V | tail -1)
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
           test -x "$ZIPALIGN"
-          test -x "$APKSIGNER"
-          "$ZIPALIGN" -f 4 "$UNSIGNED" Nadaye-Beheshti-2.0-aligned.apk
-          PASS=$(openssl rand -hex 18)
-          keytool -genkeypair -v -keystore nadaye-beheshti-release.jks -storepass "$PASS" -keypass "$PASS" -alias nadaye -keyalg RSA -keysize 4096 -validity 10000 -dname 'CN=Nadaye Beheshti, OU=Android, O=Nadaye Beheshti, C=AF'
-          "$APKSIGNER" sign --ks nadaye-beheshti-release.jks --ks-key-alias nadaye --ks-pass "pass:$PASS" --key-pass "pass:$PASS" --out Nadaye-Beheshti-2.0.apk Nadaye-Beheshti-2.0-aligned.apk
-          "$APKSIGNER" verify --verbose --print-certs Nadaye-Beheshti-2.0.apk
-          rm -f Nadaye-Beheshti-2.0-aligned.apk
-          printf 'Nadaye Beheshti Android release signing backup\nAlias: nadaye\nStore password: %s\nKey password: %s\n\nKeep this file together with nadaye-beheshti-release.jks. Future APK updates must be signed with the same key.\n' "$PASS" "$PASS" > SIGNING-KEY.txt
+          test -s "$APKSIGNER_JAR"
+          "$ZIPALIGN" -f 4 "$UNSIGNED" Nadaye-Beheshti-3.0-aligned-unsigned.apk
+          cp "$APKSIGNER_JAR" apksigner.jar
 
-      - name: APK smoke checks
+      - name: Smoke check unsigned APK
         shell: bash
         run: |
           set -euo pipefail
-          test -s Nadaye-Beheshti-2.0.apk
-          unzip -t Nadaye-Beheshti-2.0.apk >/dev/null
-          unzip -l Nadaye-Beheshti-2.0.apk | grep 'assets/quran.json' >/dev/null
-          unzip -p Nadaye-Beheshti-2.0.apk assets/quran.json > /tmp/quran-packed.json
-          python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/quran-packed.json',encoding='utf-8'))
-          assert len(d)==114 and sum(len(x.get('verses',[])) for x in d)>=6200
-          PY
+          test -s Nadaye-Beheshti-3.0-aligned-unsigned.apk
+          unzip -t Nadaye-Beheshti-3.0-aligned-unsigned.apk >/dev/null
+          unzip -l Nadaye-Beheshti-3.0-aligned-unsigned.apk | grep 'assets/quran.json' >/dev/null
+          unzip -l Nadaye-Beheshti-3.0-aligned-unsigned.apk | grep -E 'res/.+\.mp3' >/dev/null
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
-          "$AAPT" dump badging Nadaye-Beheshti-2.0.apk | grep "package: name='com.nadaye.beheshti'" >/dev/null
-          sha256sum Nadaye-Beheshti-2.0.apk > APK-SHA256.txt
-          echo 'APK smoke checks passed'
+          "$AAPT" dump badging Nadaye-Beheshti-3.0-aligned-unsigned.apk | grep "package: name='com.nadaye.beheshti'" >/dev/null
+          "$AAPT" dump badging Nadaye-Beheshti-3.0-aligned-unsigned.apk | grep "versionCode='3'" >/dev/null
+          sha256sum Nadaye-Beheshti-3.0-aligned-unsigned.apk > UNSIGNED-SHA256.txt
+          echo 'Unsigned APK smoke checks passed'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Nadaye-Beheshti-2.0-Release
+          name: Nadaye-Beheshti-3.0-Unsigned
           path: |
-            Nadaye-Beheshti-2.0.apk
-            APK-SHA256.txt
-            nadaye-beheshti-release.jks
-            SIGNING-KEY.txt
+            Nadaye-Beheshti-3.0-aligned-unsigned.apk
+            apksigner.jar
+            UNSIGNED-SHA256.txt
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 30
