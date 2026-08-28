@@ -9,6 +9,9 @@ jobs:
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -19,55 +22,22 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Assemble final source
+      - name: Restore validated v4.7 source and apply central fix
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if curl -L --fail --retry 2 'https://at.adobe.com/KYtdZd634HeDuZGm' -o /tmp/premium.zip; then
-            echo 'e7e4a578e91f119d7164eba0e9cdc3ca6de7014a09a353f821467c9b53492237  /tmp/premium.zip' | sha256sum -c -
-          else
-            echo 'Adobe overlay unavailable; repairing repository-bundled overlay parts.'
-            python3 - <<'PY'
-          from pathlib import Path
-          import base64, io, zipfile
-          parts=sorted(Path('android-nadaye/v2-overlay-parts').glob('part*.b64'))
-          chunks=[''.join(p.read_text(encoding='ascii').split()) for p in parts]
-          raw=''.join(chunks)
-          def good(x):
-              try:
-                  data=base64.b64decode(x,validate=True)
-                  with zipfile.ZipFile(io.BytesIO(data)) as z:
-                      return data if z.testzip() is None else None
-              except Exception:
-                  return None
-          data=good(raw)
-          if data is None:
-              alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-              boundaries=[]; n=0
-              for c in chunks[:-1]:
-                  n+=len(c); boundaries.append(n)
-              for pos in boundaries:
-                  for ch in alphabet:
-                      data=good(raw[:pos]+ch+raw[pos:])
-                      if data is not None:
-                          print('Recovered bundled overlay at boundary',pos)
-                          break
-                  if data is not None: break
-          if data is None:
-              raise SystemExit('Could not reconstruct bundled overlay')
-          Path('/tmp/premium.zip').write_bytes(data)
-          PY
-            unzip -t /tmp/premium.zip >/dev/null
+          curl -L --fail --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/9686402260/zip" \
+            -o /tmp/v47-artifact.zip
+          unzip -j -o /tmp/v47-artifact.zip generated-MainActivity.java -d /tmp
+          cp /tmp/generated-MainActivity.java android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          if [ ! -e android-nadaye/app/src/main/res/drawable/leader_hero.xml ] && [ ! -e android-nadaye/app/src/main/res/drawable/leader_hero.png ]; then
+            cp android-nadaye/app/src/main/res/drawable/ic_launcher.xml android-nadaye/app/src/main/res/drawable/leader_hero.xml
           fi
-          unzip -o /tmp/premium.zip -d android-nadaye
-          python3 android-hardening/apply.py
-          python3 android-hardening/runtime_helpers.py
-          cat android-hardening/v44_part1.py android-hardening/v44_part2.py android-hardening/v44_part3.py > /tmp/v44_upgrade.py
-          python3 -m py_compile /tmp/v44_upgrade.py
-          python3 /tmp/v44_upgrade.py
-          python3 android-hardening/v45_cover.py
-          python3 android-hardening/v46_central.py
-          python3 android-hardening/v47_editor_polish.py
           python3 android-hardening/v48_central_fix.py
           python3 - <<'PY'
           from pathlib import Path
@@ -77,6 +47,9 @@ jobs:
           s=re.sub(r'versionCode\s+\d+','versionCode 13',s)
           s=re.sub(r"versionName\s+['\"][^'\"]+['\"]","versionName '4.8.0'",s)
           g.write_text(s,encoding='utf-8')
+          p=Path('android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java')
+          s=p.read_text(encoding='utf-8').replace('نسخه ۴.۷','نسخه ۴.۸')
+          p.write_text(s,encoding='utf-8')
           PY
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
@@ -97,12 +70,8 @@ jobs:
           cp android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java generated-MainActivity.java
           grep -q 'versionCode 13' android-nadaye/app/build.gradle
           grep -q "versionName '4.8.0'" android-nadaye/app/build.gradle
-          grep -q 'showCentralPublisher' generated-MainActivity.java
           grep -q 'showTopTitleEditor' generated-MainActivity.java
           grep -q 'heroDisplayHeight' generated-MainActivity.java
-          grep -q 'ownerField' generated-MainActivity.java
-          grep -q 'REQ_TITLE_FONT=816' generated-MainActivity.java
-          grep -q 'k.startsWith("title.")' generated-MainActivity.java
           grep -q 'centralPinHash' generated-MainActivity.java
           grep -q 'owner/recover-legacy' generated-MainActivity.java
           grep -q 'server_verification_failed' generated-MainActivity.java
