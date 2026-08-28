@@ -28,7 +28,13 @@ jobs:
           unzip -o /tmp/premium.zip -d android-nadaye
           python3 android-hardening/apply.py
           python3 android-hardening/runtime_helpers.py
-          sed -i "s/'))).decode/')).decode/" android-hardening/v44_upgrade.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android-hardening/v44_upgrade.py')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace("exec(zlib.decompress(base64.b64decode(DATA)).decode('utf-8'))", "DATA += '='*((4-len(DATA)%4)%4)\nexec(zlib.decompress(base64.b64decode(DATA)).decode('utf-8'))")
+          p.write_text(s,encoding='utf-8')
+          PY
           python3 android-hardening/v44_upgrade.py
           python3 - <<'PY'
           from pathlib import Path
