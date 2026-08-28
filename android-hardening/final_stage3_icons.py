@@ -2,12 +2,9 @@ from pathlib import Path
 p=Path('android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java')
 s=p.read_text(encoding='utf-8')
 
-# Stage 3 final requirement:
-# Do not use emoji/painted illustration glyphs for primary navigation and worship cards.
-# Use clean native vector-style drawables generated programmatically so they remain sharp at every density.
-# Custom owner icon overrides remain supported where already present, but these become the immutable defaults.
-
-anchor='    Drawable pillBg(int fill,int stroke){'
+# Clean native vector-style icon defaults. They are sharp at every Android density and
+# replace the old hand-drawn feature/top/bottom defaults. Owner overrides still work.
+anchor='    GradientDrawable pillBg(int fill,int strokeColor){'
 assert anchor in s
 helper=r'''    Drawable proIcon(String key,int color){
         final int c=color;
@@ -31,13 +28,13 @@ helper=r'''    Drawable proIcon(String key,int color){
 '''
 s=s.replace(anchor,helper+anchor,1)
 
-# Replace known custom-icon helper calls where present. Keep compatibility with varying generated source names.
-for old,new in [
-('drawCustomIcon(iv,key);','applyProIcon(iv,key);'),
-('drawCustomIcon(icon,key);','applyProIcon(icon,key);'),
-('setCustomIcon(iv,key);','applyProIcon(iv,key);'),
-('setCustomIcon(icon,key);','applyProIcon(icon,key);')]:
-    s=s.replace(old,new)
+# Replace the visible feature and bottom-navigation custom View icons with the clean ImageView defaults.
+s=s.replace('FeatureIconView icon=new FeatureIconView(this,type);','ImageView icon=new ImageView(this);applyProIcon(icon,type);',1)
+s=s.replace('BottomIconView icon=new BottomIconView(this,type,selected);','ImageView icon=new ImageView(this);applyProIcon(icon,type);if(selected){icon.setBackground(pillBg(green(),gold()));icon.setElevation(dp(4));}',1)
+# Top search/bell icons use the same icon family.
+s=s.replace('TopIconView bell=new TopIconView(this,"bell");','ImageView bell=new ImageView(this);applyProIcon(bell,"bell");bell.setBackground(pillBg(Color.WHITE,withAlpha(gold(),100)));',1)
+s=s.replace('TopIconView search=new TopIconView(this,"search");','ImageView search=new ImageView(this);applyProIcon(search,"search");search.setBackground(pillBg(Color.WHITE,withAlpha(gold(),100)));',1)
 
 p.write_text(s,encoding='utf-8')
+assert 'applyProIcon(icon,type)' in s
 print('Stage 3 professional native vector icon defaults installed')
