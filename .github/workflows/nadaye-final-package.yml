@@ -1,4 +1,4 @@
-name: Package Nadaye Beheshti v5.0 final
+name: Package Nadaye Beheshti v5.1 final
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 jobs:
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     permissions:
       actions: read
       contents: read
@@ -22,7 +22,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Restore validated source and apply durable central backend
+      - name: Restore validated base and bake all final public features
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -35,84 +35,83 @@ jobs:
             -o /tmp/v47-artifact.zip
           unzip -j -o /tmp/v47-artifact.zip generated-MainActivity.java -d /tmp
           cp /tmp/generated-MainActivity.java android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
-          if [ ! -e android-nadaye/app/src/main/res/drawable/leader_hero.xml ] && [ ! -e android-nadaye/app/src/main/res/drawable/leader_hero.png ]; then
-            cp android-nadaye/app/src/main/res/drawable/ic_launcher.xml android-nadaye/app/src/main/res/drawable/leader_hero.xml
-          fi
+
+          # Keep legacy owner/central code only as an optional compatibility feature; the public build does not depend on it.
           python3 android-hardening/v48_central_fix.py
           python3 android-hardening/v49_webview_bridge.py
           python3 android-hardening/v50_direct_lovable.py
+
+          mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw android-nadaye/app/src/main/res/drawable
+
+          # Compile-time placeholder for the locked resource. The final release packager replaces this exact APK entry with the approved 1536x640 cover bytes before signing.
+          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Example.jpg' -o android-nadaye/app/src/main/res/drawable/nadaye_locked_cover.jpg
+
+          # Elegant Arabic title font (Amiri, SIL OFL).
+          curl -L --fail --retry 3 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf' -o android-nadaye/app/src/main/assets/amiri_regular.ttf
+          curl -L --fail --retry 3 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/OFL.txt' -o android-nadaye/app/src/main/assets/AMIRI-OFL.txt
+
+          # Canonical Quran and Mafatih text datasets.
+          curl -L --fail --retry 3 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
+          curl -L --fail --retry 3 'https://raw.githubusercontent.com/aminpaydar/Mafatih/master/mafatih-server/chapters.json' -o android-nadaye/app/src/main/assets/mafatih.json
+          printf '%s\n' 'Mafatih text dataset: aminpaydar/Mafatih, Apache License 2.0.' > android-nadaye/app/src/main/assets/MAFATIH-LICENSE.txt
+
+          # Three redistributable adhan recordings; normalize loudness, then the Android service uses the Alarm stream at device maximum during playback.
+          command -v ffmpeg >/dev/null 2>&1 || { sudo apt-get update -y && sudo apt-get install -y ffmpeg; }
+          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Adhan.ogg' -o /tmp/adhan1.ogg
+          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Beautiful_adhan.ogg' -o /tmp/adhan2.ogg
+          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Muslim_calling_to_prayer.ogg' -o /tmp/adhan3.ogg
+          ffmpeg -hide_banner -loglevel error -y -i /tmp/adhan1.ogg -af 'loudnorm=I=-14:TP=-1:LRA=7' -c:a libvorbis -q:a 6 android-nadaye/app/src/main/res/raw/default_adhan.ogg
+          ffmpeg -hide_banner -loglevel error -y -i /tmp/adhan2.ogg -af 'loudnorm=I=-14:TP=-1:LRA=7' -c:a libvorbis -q:a 6 android-nadaye/app/src/main/res/raw/adhan_beautiful.ogg
+          ffmpeg -hide_banner -loglevel error -y -i /tmp/adhan3.ogg -af 'loudnorm=I=-14:TP=-1:LRA=7' -c:a libvorbis -q:a 6 android-nadaye/app/src/main/res/raw/adhan_azan.ogg
+          cat > android-nadaye/app/src/main/assets/ADHAN-LICENSE.txt <<'EOF'
+          Adhan.ogg — Wikimedia Commons — CC0 1.0 Universal.
+          Beautiful adhan.ogg — Adam-synagda — Wikimedia Commons — CC0 1.0 Universal.
+          Muslim calling to prayer.ogg — Aishatu98 — Wikimedia Commons — CC0 1.0 Universal.
+          The packaged copies have only loudness normalization applied for consistent alarm playback.
+          EOF
+
+          # Apply the user's approved public defaults directly into source; none of these depend on hidden-panel publication.
+          python3 android-hardening/v51_locked_cover.py
+          python3 android-hardening/v52_top_kalima.py
+          python3 android-hardening/final_stage3_icons.py
+          python3 android-hardening/final_stage4_core.py
+          python3 android-hardening/final_stage4_adhan_ui.py
+
           python3 - <<'PY'
           from pathlib import Path
-          import re
+          import json,re
           g=Path('android-nadaye/app/build.gradle')
           s=g.read_text(encoding='utf-8')
-          s=re.sub(r'versionCode\s+\d+','versionCode 15',s)
-          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]","versionName '5.0.0'",s)
+          s=re.sub(r'versionCode\s+\d+','versionCode 16',s)
+          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]","versionName '5.1.0'",s)
           g.write_text(s,encoding='utf-8')
           p=Path('android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java')
-          s=p.read_text(encoding='utf-8').replace('نسخه ۴.۷','نسخه ۵.۰').replace('نسخه ۴.۸','نسخه ۵.۰').replace('نسخه ۴.۹','نسخه ۵.۰')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('نسخه ۴.۷','نسخه ۵.۱').replace('نسخه ۴.۸','نسخه ۵.۱').replace('نسخه ۴.۹','نسخه ۵.۱').replace('نسخه ۵.۰','نسخه ۵.۱')
           p.write_text(s,encoding='utf-8')
-          PY
-          mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
-          curl -L --fail --retry 3 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
-          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Adhan.ogg' -o android-nadaye/app/src/main/res/raw/default_adhan.ogg
-          curl -L --fail --retry 3 'https://raw.githubusercontent.com/aminpaydar/Mafatih/master/mafatih-server/chapters.json' -o android-nadaye/app/src/main/assets/mafatih.json
-          printf '%s\n' 'Bundled fallback adhan: Wikimedia Commons File:Adhan.ogg, Aishatu98, CC0 1.0 Universal.' > android-nadaye/app/src/main/assets/ADHAN-LICENSE.txt
-          printf '%s\n' 'Mafatih text dataset: aminpaydar/Mafatih, Apache License 2.0.' > android-nadaye/app/src/main/assets/MAFATIH-LICENSE.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
           q=json.loads(Path('android-nadaye/app/src/main/assets/quran.json').read_text(encoding='utf-8'))
           assert len(q)==114 and sum(len(x.get('verses',[])) for x in q)>=6200
           m=json.loads(Path('android-nadaye/app/src/main/assets/mafatih.json').read_text(encoding='utf-8'))
           assert isinstance(m,list) and len(m)>0
-          a=Path('android-nadaye/app/src/main/res/raw/default_adhan.ogg')
-          assert a.stat().st_size>100000 and a.read_bytes()[:4]==b'OggS'
+          for f in ['default_adhan.ogg','adhan_beautiful.ogg','adhan_azan.ogg']:
+              a=Path('android-nadaye/app/src/main/res/raw')/f
+              assert a.stat().st_size>100000 and a.read_bytes()[:4]==b'OggS'
+          assert Path('android-nadaye/app/src/main/assets/amiri_regular.ttf').stat().st_size>100000
           PY
-          cp android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java generated-MainActivity.java
-          grep -q 'versionCode 15' android-nadaye/app/build.gradle
-          grep -q "versionName '5.0.0'" android-nadaye/app/build.gradle
-          grep -q 'showTopTitleEditor' generated-MainActivity.java
-          grep -q 'heroDisplayHeight' generated-MainActivity.java
-          grep -q 'centralPinHash' generated-MainActivity.java
-          grep -q 'owner/recover-legacy' generated-MainActivity.java
-          grep -q 'server_verification_failed' generated-MainActivity.java
-          grep -q 'https://nadaye-beheshti-central-api.lovable.app' generated-MainActivity.java
-          grep -q 'central_non_json' generated-MainActivity.java
-          grep -q '/api/asset-chunk' generated-MainActivity.java
-          grep -q '/api/asset-finalize' generated-MainActivity.java
-          ! grep -q 'nativeBridge=1&v=49' generated-MainActivity.java
 
-      - name: Verify production central JSON API
-        shell: bash
-        run: |
-          set -euo pipefail
-          BASE='https://nadaye-beheshti-central-api.lovable.app'
-          curl -sS --fail --retry 3 -D /tmp/health.h "$BASE/api/health" -o /tmp/health.json
-          curl -sS --fail --retry 3 -D /tmp/config.h "$BASE/api/config" -o /tmp/config.json
-          curl -sS --fail --retry 3 -D /tmp/owner.h "$BASE/api/owner-status" -o /tmp/owner.json
-          grep -qi '^content-type: application/json' /tmp/health.h
-          grep -qi '^content-type: application/json' /tmp/config.h
-          grep -qi '^content-type: application/json' /tmp/owner.h
-          python3 - <<'PY'
-          import json
-          for f in ('/tmp/health.json','/tmp/config.json','/tmp/owner.json'):
-              with open(f,encoding='utf-8') as h: data=json.load(h)
-              assert isinstance(data,dict)
-          health=json.load(open('/tmp/health.json',encoding='utf-8'))
-          config=json.load(open('/tmp/config.json',encoding='utf-8'))
-          owner=json.load(open('/tmp/owner.json',encoding='utf-8'))
-          assert health.get('ok') is True and health.get('database') is True
-          assert isinstance(config.get('version'),int) and 'published' in config and 'payload' in config
-          assert 'claimed' in owner and isinstance(owner.get('version'),int)
-          PY
-          CODE=$(curl -sS --retry 3 -o /tmp/deny.json -w '%{http_code}' -X POST "$BASE/api/publish" -H 'Content-Type: application/json' --data '{"payload":{}}')
-          case "$CODE" in 401|403|409) ;; *) echo "Unexpected unauthenticated publish code: $CODE"; cat /tmp/deny.json; exit 1;; esac
-          python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/deny.json',encoding='utf-8'))
-          assert isinstance(d,dict) and d.get('ok') is False and d.get('error')
-          PY
+          cp android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java generated-MainActivity.java
+          grep -q 'versionCode 16' android-nadaye/app/build.gradle
+          grep -q "versionName '5.1.0'" android-nadaye/app/build.gradle
+          grep -q 'R.drawable.nadaye_locked_cover' generated-MainActivity.java
+          grep -q 'لا إله إلا الله محمد رسول الله' generated-MainActivity.java
+          grep -q 'amiri_regular.ttf' generated-MainActivity.java
+          grep -q 'applyProIcon' generated-MainActivity.java
+          grep -q 'startQuranSurah' generated-MainActivity.java
+          grep -q 'playQueuedAyah' generated-MainActivity.java
+          grep -q 'builtinSpiritualAudio' generated-MainActivity.java
+          grep -q 'سه اذان کامل و بلند' generated-MainActivity.java
+          grep -q 'BUILTIN_RAW' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
+          grep -q 'STREAM_ALARM' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
 
       - name: Build final APK
         working-directory: android-nadaye
@@ -127,21 +126,23 @@ jobs:
           ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign -type f | sort -V | tail -1)
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
-          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-5.0-Final-Unsigned.apk
-          unzip -t Nadaye-Beheshti-5.0-Final-Unsigned.apk >/dev/null
-          "$AAPT" dump badging Nadaye-Beheshti-5.0-Final-Unsigned.apk > badging.txt
-          grep -F "package: name='com.nadaye.beheshti' versionCode='15' versionName='5.0.0'" badging.txt
-          sha256sum Nadaye-Beheshti-5.0-Final-Unsigned.apk > SHA256.txt
+          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-5.1-Final-Unsigned.apk
+          unzip -t Nadaye-Beheshti-5.1-Final-Unsigned.apk >/dev/null
+          unzip -l Nadaye-Beheshti-5.1-Final-Unsigned.apk | grep -F 'res/drawable/nadaye_locked_cover.jpg' > cover-entry.txt
+          "$AAPT" dump badging Nadaye-Beheshti-5.1-Final-Unsigned.apk > badging.txt
+          grep -F "package: name='com.nadaye.beheshti' versionCode='16' versionName='5.1.0'" badging.txt
+          sha256sum Nadaye-Beheshti-5.1-Final-Unsigned.apk > SHA256.txt
           cp "$APKSIGNER_JAR" apksigner.jar
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Nadaye-Beheshti-5.0-Final-Unsigned
+          name: Nadaye-Beheshti-5.1-Final-Unsigned
           path: |
-            Nadaye-Beheshti-5.0-Final-Unsigned.apk
+            Nadaye-Beheshti-5.1-Final-Unsigned.apk
             apksigner.jar
             SHA256.txt
             badging.txt
+            cover-entry.txt
             generated-MainActivity.java
           if-no-files-found: error
           retention-days: 30
