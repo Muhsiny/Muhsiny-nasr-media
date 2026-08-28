@@ -1,0 +1,78 @@
+name: Package Nadaye Beheshti v4.2 final
+
+on:
+  push:
+    branches: [ nadaye-beheshti-android ]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Assemble final source
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 'https://at.adobe.com/KYtdZd634HeDuZGm' -o /tmp/premium.zip
+          echo 'e7e4a578e91f119d7164eba0e9cdc3ca6de7014a09a353f821467c9b53492237  /tmp/premium.zip' | sha256sum -c -
+          unzip -o /tmp/premium.zip -d android-nadaye
+          python3 android-hardening/apply.py
+          python3 android-hardening/runtime_helpers.py
+          mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
+          curl -L --fail --retry 3 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
+          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Adhan.ogg' -o android-nadaye/app/src/main/res/raw/default_adhan.ogg
+          printf '%s\n' 'Bundled fallback adhan: Wikimedia Commons File:Adhan.ogg, author Aishatu98, CC0 1.0 Universal.' > android-nadaye/app/src/main/assets/ADHAN-LICENSE.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          q=Path('android-nadaye/app/src/main/assets/quran.json')
+          d=json.loads(q.read_text(encoding='utf-8'))
+          assert len(d)==114 and sum(len(x.get('verses',[])) for x in d)>=6200
+          a=Path('android-nadaye/app/src/main/res/raw/default_adhan.ogg')
+          assert a.stat().st_size>100000 and a.read_bytes()[:4]==b'OggS'
+          PY
+          grep -q 'versionCode 7' android-nadaye/app/build.gradle
+          grep -q "versionName '4.2.0'" android-nadaye/app/build.gradle
+          grep -q 'R.raw.default_adhan' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
+          grep -q 'requestSingleUpdate' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+
+      - name: Build final APK
+        working-directory: android-nadaye
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Validate and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=android-nadaye/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$SRC"
+          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign -type f | sort -V | tail -1)
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
+          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-4.2-Final-Unsigned.apk
+          unzip -t Nadaye-Beheshti-4.2-Final-Unsigned.apk >/dev/null
+          "$AAPT" dump badging Nadaye-Beheshti-4.2-Final-Unsigned.apk > badging.txt
+          grep -F "package: name='com.nadaye.beheshti' versionCode='7' versionName='4.2.0'" badging.txt
+          sha256sum Nadaye-Beheshti-4.2-Final-Unsigned.apk > SHA256.txt
+          cp "$APKSIGNER_JAR" apksigner.jar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nadaye-Beheshti-4.2-Final-Unsigned
+          path: |
+            Nadaye-Beheshti-4.2-Final-Unsigned.apk
+            apksigner.jar
+            SHA256.txt
+            badging.txt
+          if-no-files-found: error
+          retention-days: 30
