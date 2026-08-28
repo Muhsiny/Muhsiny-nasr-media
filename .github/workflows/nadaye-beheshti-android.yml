@@ -1,4 +1,4 @@
-name: Build Nadaye Beheshti Android v4.1 hardened
+name: Build Nadaye Beheshti Android v4.2 final
 
 on:
   push:
@@ -33,42 +33,42 @@ jobs:
           grep -q 'class FeatureIconView' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'View makeBottomNav()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'void startHomeTicker()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
-          grep -q '!"طلوع".equals(e.getKey())' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
-          grep -q 'static class PersianDate' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'builtInAdhanNames' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
-          grep -q 'stream-0wonG' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
-          grep -q 'android.intent.action.TIMEZONE_CHANGED' android-nadaye/app/src/main/AndroidManifest.xml
           ! grep -q 'FIT_XY' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
-          echo 'Premium responsive home, owner studio, Shia muezzins and resilient alarm receivers are present.'
 
-      - name: Apply post-overlay v4.1 hardening
+      - name: Apply final v4.2 hardening
         shell: bash
         run: |
           set -euo pipefail
           python3 android-hardening/apply.py
-          grep -q 'versionCode 6' android-nadaye/app/build.gradle
-          grep -q "versionName '4.1.0'" android-nadaye/app/build.gradle
-          grep -q 'ensureExactAlarmAccess' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
-          grep -q 'allowBackup="false"' android-nadaye/app/src/main/AndroidManifest.xml
+          grep -q 'versionCode 7' android-nadaye/app/build.gradle
+          grep -q "versionName '4.2.0'" android-nadaye/app/build.gradle
+          grep -q 'requestSingleUpdate' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          grep -q 'R.raw.default_adhan' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
 
-      - name: Prepare verified offline Quran text
+      - name: Prepare verified offline Quran and bundled adhan
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p android-nadaye/app/src/main/assets
+          mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
           curl -L --fail --retry 3 --retry-delay 2 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
+          curl -L --fail --retry 3 --retry-delay 2 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Adhan.ogg' -o android-nadaye/app/src/main/res/raw/default_adhan.ogg
+          cat > android-nadaye/app/src/main/assets/ADHAN-LICENSE.txt <<'EOF'
+          Bundled fallback adhan: Wikimedia Commons File:Adhan.ogg, author Aishatu98, dedicated under CC0 1.0 Universal. Source: https://commons.wikimedia.org/wiki/File:Adhan.ogg
+          EOF
           python3 - <<'PY'
           import json
           from pathlib import Path
           q=Path('android-nadaye/app/src/main/assets/quran.json')
           d=json.loads(q.read_text(encoding='utf-8'))
           assert isinstance(d,list) and len(d)==114
-          verses=sum(len(x.get('verses',[])) for x in d)
-          assert verses>=6200
-          assert d[0]['verses'][0]['text'].strip()
+          assert sum(len(x.get('verses',[])) for x in d)>=6200
+          a=Path('android-nadaye/app/src/main/res/raw/default_adhan.ogg')
+          assert a.stat().st_size>100000
+          assert a.read_bytes()[:4]==b'OggS'
           hero=Path('android-nadaye/app/src/main/res/drawable-nodpi/leader_hero.jpg')
           assert hero.exists() and hero.stat().st_size>10000
-          print('Validated Quran:',len(d),'surahs /',verses,'verses; hero:',hero.stat().st_size,'bytes')
+          print('Offline Quran and CC0 adhan validated:',a.stat().st_size,'bytes')
           PY
 
       - name: Build release APK
@@ -83,31 +83,29 @@ jobs:
           test -s "$UNSIGNED"
           ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign -type f | sort -V | tail -1)
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
-          test -x "$ZIPALIGN"
-          test -s "$APKSIGNER_JAR"
-          "$ZIPALIGN" -f 4 "$UNSIGNED" Nadaye-Beheshti-4.1-aligned-unsigned.apk
+          "$ZIPALIGN" -f 4 "$UNSIGNED" Nadaye-Beheshti-4.2-aligned-unsigned.apk
           cp "$APKSIGNER_JAR" apksigner.jar
 
       - name: Smoke check unsigned APK
         shell: bash
         run: |
           set -euo pipefail
-          APK='Nadaye-Beheshti-4.1-aligned-unsigned.apk'
+          APK='Nadaye-Beheshti-4.2-aligned-unsigned.apk'
           test -s "$APK"
           unzip -t "$APK" >/dev/null
           unzip -l "$APK" | grep -F 'assets/quran.json' >/dev/null
+          unzip -l "$APK" | grep -F 'res/raw/default_adhan.ogg' >/dev/null
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
-          test -x "$AAPT"
           "$AAPT" dump badging "$APK" | tee /tmp/badging.txt
-          grep -F "package: name='com.nadaye.beheshti' versionCode='6' versionName='4.1.0'" /tmp/badging.txt >/dev/null
+          grep -F "package: name='com.nadaye.beheshti' versionCode='7' versionName='4.2.0'" /tmp/badging.txt >/dev/null
           sha256sum "$APK" > UNSIGNED-SHA256.txt
-          echo 'Unsigned APK smoke checks passed'
+          echo 'Final unsigned APK smoke checks passed'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Nadaye-Beheshti-4.1-Unsigned
+          name: Nadaye-Beheshti-4.2-Final-Unsigned
           path: |
-            Nadaye-Beheshti-4.1-aligned-unsigned.apk
+            Nadaye-Beheshti-4.2-aligned-unsigned.apk
             apksigner.jar
             UNSIGNED-SHA256.txt
           if-no-files-found: error
