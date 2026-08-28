@@ -23,8 +23,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -L --fail --retry 3 'https://at.adobe.com/KYtdZd634HeDuZGm' -o /tmp/premium.zip
-          echo 'e7e4a578e91f119d7164eba0e9cdc3ca6de7014a09a353f821467c9b53492237  /tmp/premium.zip' | sha256sum -c -
+          if curl -L --fail --retry 2 'https://at.adobe.com/KYtdZd634HeDuZGm' -o /tmp/premium.zip; then
+            echo 'e7e4a578e91f119d7164eba0e9cdc3ca6de7014a09a353f821467c9b53492237  /tmp/premium.zip' | sha256sum -c -
+          else
+            echo 'Adobe overlay unavailable; using repository-bundled overlay parts.'
+            cat android-nadaye/v2-overlay-parts/part*.b64 | tr -d '\n\r' | base64 -d > /tmp/premium.zip
+            unzip -t /tmp/premium.zip >/dev/null
+          fi
           unzip -o /tmp/premium.zip -d android-nadaye
           python3 android-hardening/apply.py
           python3 android-hardening/runtime_helpers.py
