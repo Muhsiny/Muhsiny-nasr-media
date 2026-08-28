@@ -83,6 +83,37 @@ jobs:
           grep -q '/api/asset-finalize' generated-MainActivity.java
           ! grep -q 'nativeBridge=1&v=49' generated-MainActivity.java
 
+      - name: Verify production central JSON API
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://nadaye-beheshti-central-api.lovable.app'
+          curl -sS --fail --retry 3 -D /tmp/health.h "$BASE/api/health" -o /tmp/health.json
+          curl -sS --fail --retry 3 -D /tmp/config.h "$BASE/api/config" -o /tmp/config.json
+          curl -sS --fail --retry 3 -D /tmp/owner.h "$BASE/api/owner-status" -o /tmp/owner.json
+          grep -qi '^content-type: application/json' /tmp/health.h
+          grep -qi '^content-type: application/json' /tmp/config.h
+          grep -qi '^content-type: application/json' /tmp/owner.h
+          python3 - <<'PY'
+          import json
+          for f in ('/tmp/health.json','/tmp/config.json','/tmp/owner.json'):
+              with open(f,encoding='utf-8') as h: data=json.load(h)
+              assert isinstance(data,dict)
+          health=json.load(open('/tmp/health.json',encoding='utf-8'))
+          config=json.load(open('/tmp/config.json',encoding='utf-8'))
+          owner=json.load(open('/tmp/owner.json',encoding='utf-8'))
+          assert health.get('ok') is True and health.get('database') is True
+          assert isinstance(config.get('version'),int) and 'published' in config and 'payload' in config
+          assert 'claimed' in owner and isinstance(owner.get('version'),int)
+          PY
+          CODE=$(curl -sS --retry 3 -o /tmp/deny.json -w '%{http_code}' -X POST "$BASE/api/publish" -H 'Content-Type: application/json' --data '{"payload":{}}')
+          case "$CODE" in 401|403|409) ;; *) echo "Unexpected unauthenticated publish code: $CODE"; cat /tmp/deny.json; exit 1;; esac
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/deny.json',encoding='utf-8'))
+          assert isinstance(d,dict) and d.get('ok') is False and d.get('error')
+          PY
+
       - name: Build final APK
         working-directory: android-nadaye
         run: gradle :app:assembleRelease --stacktrace
