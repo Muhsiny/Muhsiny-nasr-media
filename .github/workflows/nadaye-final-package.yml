@@ -1,4 +1,4 @@
-name: Package Nadaye Beheshti v4.2 final
+name: Package Nadaye Beheshti v4.3 final
 
 on:
   push:
@@ -28,6 +28,18 @@ jobs:
           unzip -o /tmp/premium.zip -d android-nadaye
           python3 android-hardening/apply.py
           python3 android-hardening/runtime_helpers.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          g=Path('android-nadaye/app/build.gradle')
+          s=g.read_text(encoding='utf-8')
+          s=re.sub(r'versionCode\s+\d+','versionCode 8',s)
+          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]","versionName '4.3.0'",s)
+          g.write_text(s,encoding='utf-8')
+          p=Path('android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java')
+          m=p.read_text(encoding='utf-8').replace('نسخه ۴.۲','نسخه ۴.۳')
+          p.write_text(m,encoding='utf-8')
+          PY
           cp android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java generated-MainActivity.java
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
@@ -42,10 +54,12 @@ jobs:
           a=Path('android-nadaye/app/src/main/res/raw/default_adhan.ogg')
           assert a.stat().st_size>100000 and a.read_bytes()[:4]==b'OggS'
           PY
-          grep -q 'versionCode 7' android-nadaye/app/build.gradle
-          grep -q "versionName '4.2.0'" android-nadaye/app/build.gradle
+          grep -q 'versionCode 8' android-nadaye/app/build.gradle
+          grep -q "versionName '4.3.0'" android-nadaye/app/build.gradle
+          grep -q 'now-tapWindow>5000' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          grep -q 'theme.leaderWidth' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          grep -q 'ذخیره اندازه و جایگاه تصویر' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'R.raw.default_adhan' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
-          grep -q 'requestSingleUpdate' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
 
       - name: Build final APK
         working-directory: android-nadaye
@@ -60,18 +74,18 @@ jobs:
           ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign -type f | sort -V | tail -1)
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
-          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-4.2-Final-Unsigned.apk
-          unzip -t Nadaye-Beheshti-4.2-Final-Unsigned.apk >/dev/null
-          "$AAPT" dump badging Nadaye-Beheshti-4.2-Final-Unsigned.apk > badging.txt
-          grep -F "package: name='com.nadaye.beheshti' versionCode='7' versionName='4.2.0'" badging.txt
-          sha256sum Nadaye-Beheshti-4.2-Final-Unsigned.apk > SHA256.txt
+          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-4.3-Final-Unsigned.apk
+          unzip -t Nadaye-Beheshti-4.3-Final-Unsigned.apk >/dev/null
+          "$AAPT" dump badging Nadaye-Beheshti-4.3-Final-Unsigned.apk > badging.txt
+          grep -F "package: name='com.nadaye.beheshti' versionCode='8' versionName='4.3.0'" badging.txt
+          sha256sum Nadaye-Beheshti-4.3-Final-Unsigned.apk > SHA256.txt
           cp "$APKSIGNER_JAR" apksigner.jar
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Nadaye-Beheshti-4.2-Final-Unsigned
+          name: Nadaye-Beheshti-4.3-Final-Unsigned
           path: |
-            Nadaye-Beheshti-4.2-Final-Unsigned.apk
+            Nadaye-Beheshti-4.3-Final-Unsigned.apk
             apksigner.jar
             SHA256.txt
             badging.txt
