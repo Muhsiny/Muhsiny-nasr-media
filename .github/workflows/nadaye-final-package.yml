@@ -28,6 +28,7 @@ jobs:
           unzip -o /tmp/premium.zip -d android-nadaye
           python3 android-hardening/apply.py
           python3 android-hardening/runtime_helpers.py
+          sed -i "s/'))).decode/')).decode/" android-hardening/v44_upgrade.py
           python3 android-hardening/v44_upgrade.py
           python3 - <<'PY'
           from pathlib import Path
