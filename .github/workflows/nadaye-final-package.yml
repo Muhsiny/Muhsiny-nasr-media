@@ -28,6 +28,7 @@ jobs:
           unzip -o /tmp/premium.zip -d android-nadaye
           python3 android-hardening/apply.py
           python3 android-hardening/runtime_helpers.py
+          cp android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java generated-MainActivity.java
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
           curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Adhan.ogg' -o android-nadaye/app/src/main/res/raw/default_adhan.ogg
@@ -74,5 +75,6 @@ jobs:
             apksigner.jar
             SHA256.txt
             badging.txt
+            generated-MainActivity.java
           if-no-files-found: error
           retention-days: 30
