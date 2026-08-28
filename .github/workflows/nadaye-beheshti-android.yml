@@ -25,14 +25,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/JL0ydMCtuPhSfmKR' -o /tmp/nadaye-v4.zip
-          echo '8a8fdbb1e8de9201949258e6b6d63f7d94c7f3f7d95b4780f1feecf768e99769  /tmp/nadaye-v4.zip' | sha256sum -c -
+          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/KYtdZd634HeDuZGm' -o /tmp/nadaye-v4.zip
+          echo 'e7e4a578e91f119d7164eba0e9cdc3ca6de7014a09a353f821467c9b53492237  /tmp/nadaye-v4.zip' | sha256sum -c -
           unzip -o /tmp/nadaye-v4.zip -d android-nadaye
           grep -q 'void showAdminStudio()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'hiddenTapCount>=7' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'class FeatureIconView' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'View makeBottomNav()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'void startHomeTicker()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          grep -q '!"طلوع".equals(e.getKey())' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'static class PersianDate' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'builtInAdhanNames' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'stream-0wonG' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
