@@ -29,38 +29,41 @@ jobs:
           echo 'aeb506beb01745e406a25e6e068616e2ba91cf335ead2a79af86150deb6024e4  /tmp/nadaye-v3.zip' | sha256sum -c -
           unzip -o /tmp/nadaye-v3.zip -d android-nadaye
 
-      - name: Prepare Quran and verified Jafari adhan
+      - name: Prepare Quran and verified Shia adhan
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
           curl -L --fail --retry 3 --retry-delay 2 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
 
-          # Discover the current Ja'fari-Shia CDN audio URL from its own adhan page,
-          # rather than silently bundling an unrelated/Sunni recording.
-          curl -L --fail --retry 3 --retry-delay 2 'https://jafarishia.com/azan' -o /tmp/jafari-azan.html
-          python3 - <<'PY' > /tmp/jafari-audio-candidates.txt
+          # ShiaSource identifies its Adhaan collection with Shia reciters including
+          # Abather Al-Halawaji, Kassim Zadeh, Hassan Ridhayan and Mustafa Ghalwash.
+          # Resolve a currently-live recording from the collection itself.
+          for page in 'https://www.shiasource.com/audio/adhaan/' 'https://www.shiasource.com/audio/category/adhaan/' 'https://www.shiasource.com/adhan/'; do
+            curl -A 'Mozilla/5.0' -L --fail --retry 2 --retry-delay 1 "$page" >> /tmp/shia-adhan-pages.html || true
+          done
+          python3 - <<'PY' > /tmp/shia-audio-candidates.txt
           import html,re
           from pathlib import Path
           from urllib.parse import urljoin
-          s=html.unescape(Path('/tmp/jafari-azan.html').read_text(encoding='utf-8',errors='ignore')).replace('\\/','/')
+          s=html.unescape(Path('/tmp/shia-adhan-pages.html').read_text(encoding='utf-8',errors='ignore')).replace('\\/','/')
           found=[]
-          patterns=[r'https?://[^"\'<> ]+\.(?:mp3|m4a|ogg)(?:\?[^"\'<> ]*)?', r'/(?:[^"\'<> ]*/)*[^"\'<> ]+\.(?:mp3|m4a|ogg)(?:\?[^"\'<> ]*)?']
-          for pat in patterns:
+          pats=[r'https?://[^"\'<> ]+\.(?:mp3|m4a|ogg)(?:\?[^"\'<> ]*)?',r'/(?:[^"\'<> ]*/)*[^"\'<> ]+\.(?:mp3|m4a|ogg)(?:\?[^"\'<> ]*)?']
+          for pat in pats:
               for x in re.findall(pat,s,re.I):
-                  u=urljoin('https://jafarishia.com/azan',x)
+                  u=urljoin('https://www.shiasource.com/',x)
                   if u not in found: found.append(u)
-          # Prefer anything named adhan/azan/jafari.
-          found.sort(key=lambda u: (0 if any(k in u.lower() for k in ('adhan','azan','jafari')) else 1,u))
+          found.sort(key=lambda u:(0 if any(k in u.lower() for k in ('adhan','adhaan','azan','halawaji','ridhayan','zadeh','ghalwash')) else 1,u))
           print('\n'.join(found))
           PY
-          echo 'Discovered Ja\x27fari audio candidates:'
-          cat /tmp/jafari-audio-candidates.txt || true
+          echo 'Shia audio candidates:'
+          cat /tmp/shia-audio-candidates.txt || true
           : > /tmp/adhan.ok
           while IFS= read -r u; do
             [ -n "$u" ] || continue
-            if curl -L --fail --retry 2 --retry-delay 1 "$u" -o /tmp/candidate-audio; then
-              if [ $(stat -c%s /tmp/candidate-audio) -gt 100000 ]; then
+            if curl -A 'Mozilla/5.0' -L --fail --retry 2 --retry-delay 1 "$u" -o /tmp/candidate-audio; then
+              bytes=$(stat -c%s /tmp/candidate-audio)
+              if [ "$bytes" -gt 100000 ]; then
                 if python3 - <<'PY'
           from pathlib import Path
           p=Path('/tmp/candidate-audio')
@@ -74,8 +77,9 @@ jobs:
                 fi
               fi
             fi
-          done < /tmp/jafari-audio-candidates.txt
+          done < /tmp/shia-audio-candidates.txt
           test -s /tmp/adhan.ok
+          echo 'Selected Shia adhan:'; cat /tmp/adhan.ok
 
           python3 - <<'PY'
           import json
@@ -89,7 +93,7 @@ jobs:
           assert a.stat().st_size>100000
           hero=Path('android-nadaye/app/src/main/res/drawable-nodpi/leader_hero.jpg')
           assert hero.exists() and hero.stat().st_size>10000
-          print('Validated:',len(d),'surahs,',verses,'verses, Ja\x27fari adhan',a.stat().st_size,'bytes')
+          print('Validated:',len(d),'surahs,',verses,'verses, Shia adhan',a.stat().st_size,'bytes')
           PY
 
       - name: Build release APK
