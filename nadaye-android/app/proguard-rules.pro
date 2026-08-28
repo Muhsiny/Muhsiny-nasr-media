@@ -1,0 +1,1 @@
+-keepclassmembers class com.nadaye.beheshti.MainActivity$NativeBridge { @android.webkit.JavascriptInterface <methods>; }
