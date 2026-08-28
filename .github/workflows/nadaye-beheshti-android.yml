@@ -25,8 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat v2-overlay/nadaye-v2-source-overlay.zip.b64.part* > /tmp/nadaye-v2.b64
-          base64 -d /tmp/nadaye-v2.b64 > /tmp/nadaye-v2.zip
+          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/NRSTWjl5LIQnBE3z' -o /tmp/nadaye-v2.zip
           echo '004d56b0c62cfb68d4f8aa08db3e42f744e031c7b27e89c9bdb56bc3229a5e36  /tmp/nadaye-v2.zip' | sha256sum -c -
           unzip -o /tmp/nadaye-v2.zip -d android-nadaye
           python3 - <<'PY'
