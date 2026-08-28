@@ -1,4 +1,4 @@
-name: Diagnose Shiavoice audio endpoint
+name: Verify Shiavoice Shia adhan streams
 
 on:
   push:
@@ -6,42 +6,19 @@ on:
   workflow_dispatch:
 
 jobs:
-  diagnose:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Inspect Shiavoice player HTML
+      - name: Verify four Shia adhan streams
         shell: bash
         run: |
           set -euo pipefail
-          curl -A 'Mozilla/5.0' -L --fail 'https://shiavoice.com/play-0wonG' -o /tmp/page.html
-          python3 - <<'PY'
-          import re,html
-          from pathlib import Path
-          s=html.unescape(Path('/tmp/page.html').read_text(encoding='utf-8',errors='ignore')).replace('\\/','/')
-          print('SIZE',len(s))
-          print('=== SCRIPT SRCS ===')
-          for x in re.findall(r'<script[^>]+src=["\']([^"\']+)',s,re.I): print(x)
-          print('=== ALL INTERESTING URLS ===')
-          urls=[]
-          for x in re.findall(r'https?://[^"\'<>\s]+',s,re.I):
-              if any(k in x.lower() for k in ['audio','media','stream','play','file','download','api','cdn','0wong']):
-                  if x not in urls: urls.append(x)
-          for x in urls[:120]: print(x)
-          print('=== KEY SNIPPETS ===')
-          keys=['0wonG','audio','media','stream','download','track','source','src','file','player','wavesurfer','howler','sound','ajax','api']
-          low=s.lower(); seen=set(); n=0
-          for k in keys:
-              start=0
-              while True:
-                  i=low.find(k.lower(),start)
-                  if i<0: break
-                  a=max(0,i-220); b=min(len(s),i+420)
-                  snippet=' '.join(s[a:b].split())
-                  key=snippet[:250]
-                  if key not in seen:
-                      seen.add(key); print(f'--- {k} @ {i} ---'); print(snippet); n+=1
-                      if n>=80: raise SystemExit
-                  start=i+len(k)
-          PY
-          exit 1
+          for pair in 'abather 0wonG' 'moazenzadeh j7q3b' 'hadi 7Lntd' 'bouabbas EPfRi'; do
+            set -- $pair; name=$1; id=$2
+            echo "=== $name / $id ==="
+            curl -A 'Mozilla/5.0' -e "https://shiavoice.com/play-$id" -L --fail --retry 2 "https://shiavoice.com/stream-$id" -o "/tmp/$name.audio"
+            stat -c '%n %s bytes' "/tmp/$name.audio"
+            file "/tmp/$name.audio"
+            test $(stat -c%s "/tmp/$name.audio") -gt 100000
+          done
