@@ -32,6 +32,8 @@ if application is None:
     raise SystemExit('application element missing')
 application.set(A+'allowBackup', 'false')
 application.set(A+'fullBackupContent', 'false')
+application.set(A+'icon', '@mipmap/ic_launcher')
+application.set(A+'roundIcon', '@mipmap/ic_launcher_round')
 
 boot = None
 for r in application.findall('receiver'):
@@ -85,8 +87,6 @@ if 'void ensureExactAlarmAccess()' not in m:
             raise SystemExit('MainActivity brace missing')
         m = m[:pos] + helper + m[pos:]
 
-# Premium onCreate can change between overlay revisions. Inject after super.onCreate(...) rather than
-# relying on an older requestNeededPermissions marker.
 prefix = m.split('void ensureExactAlarmAccess()', 1)[0]
 if 'ensureExactAlarmAccess();' not in prefix:
     m2, n = re.subn(r'(super\.onCreate\s*\([^;]+;)', r'\1\n        ensureExactAlarmAccess();\n        try { AlarmReceiver.scheduleToday(this); } catch (Exception ignored) { }', m, count=1)
@@ -94,19 +94,27 @@ if 'ensureExactAlarmAccess();' not in prefix:
         raise SystemExit('could not locate MainActivity super.onCreate call')
     m = m2
 
-m = m.replace('نسخه ۴٫۰', 'نسخه ۴٫۱').replace('نسخه ۴.۰', 'نسخه ۴.۱')
+m = (m.replace('نسخه ۴٫۰', 'نسخه ۴٫۱')
+       .replace('نسخه ۴.۰', 'نسخه ۴.۱')
+       .replace('نسخه ۴ •', 'نسخه ۴.۱ •'))
 main.write_text(m, encoding='utf-8')
 
-# 4) Add Android 8+ adaptive launcher resources while preserving premium artwork.
+# 4) Adaptive icon with a legacy fallback.
 values = APP / 'src/main/res/values'
 values.mkdir(parents=True, exist_ok=True)
 (values / 'launcher_colors.xml').write_text(
     '<?xml version="1.0" encoding="utf-8"?>\n<resources><color name="launcher_bg">#FAF6EE</color></resources>\n',
     encoding='utf-8')
-p = APP / 'src/main/res/mipmap-anydpi-v26'
-p.mkdir(parents=True, exist_ok=True)
+legacy = APP / 'src/main/res/mipmap-anydpi'
+legacy.mkdir(parents=True, exist_ok=True)
 for name in ['ic_launcher', 'ic_launcher_round']:
-    (p / f'{name}.xml').write_text(
+    (legacy / f'{name}.xml').write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n<selector xmlns:android="http://schemas.android.com/apk/res/android"><item android:drawable="@drawable/ic_launcher"/></selector>\n',
+        encoding='utf-8')
+modern = APP / 'src/main/res/mipmap-anydpi-v26'
+modern.mkdir(parents=True, exist_ok=True)
+for name in ['ic_launcher', 'ic_launcher_round']:
+    (modern / f'{name}.xml').write_text(
         '<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"><background android:drawable="@color/launcher_bg"/><foreground android:drawable="@drawable/ic_launcher"/></adaptive-icon>\n',
         encoding='utf-8')
 
@@ -119,4 +127,6 @@ assert "versionName '4.1.0'" in final_gradle
 assert 'ensureExactAlarmAccess();' in final_main
 assert 'android.intent.action.TIMEZONE_CHANGED' in final_manifest
 assert 'allowBackup="false"' in final_manifest
+assert '@mipmap/ic_launcher' in final_manifest
+assert 'نسخه ۴.۱ •' in final_main
 print('Nadaye v4.1 post-overlay hardening applied successfully')
