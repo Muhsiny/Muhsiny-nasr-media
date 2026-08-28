@@ -88,7 +88,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test $(stat -c%s Nadaye-Beheshti-2.0.apk) -gt 1000000
+          test -s Nadaye-Beheshti-2.0.apk
+          unzip -t Nadaye-Beheshti-2.0.apk >/dev/null
           unzip -l Nadaye-Beheshti-2.0.apk | grep 'assets/quran.json' >/dev/null
           unzip -p Nadaye-Beheshti-2.0.apk assets/quran.json > /tmp/quran-packed.json
           python3 - <<'PY'
