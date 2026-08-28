@@ -36,10 +36,15 @@ jobs:
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
           curl -L --fail --retry 3 --retry-delay 2 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
 
-          # ShiaSource identifies its Adhaan collection with Shia reciters including
-          # Abather Al-Halawaji, Kassim Zadeh, Hassan Ridhayan and Mustafa Ghalwash.
-          # Resolve a currently-live recording from the collection itself.
-          for page in 'https://www.shiasource.com/audio/adhaan/' 'https://www.shiasource.com/audio/category/adhaan/' 'https://www.shiasource.com/adhan/'; do
+          : > /tmp/shia-adhan-pages.html
+          for page in \
+            'https://shiavoice.com/play-0wonG' \
+            'https://shiavoice.com/play-j7q3b' \
+            'https://shiavoice.com/play-7Lntd' \
+            'https://shiavoice.com/play-EPfRi' \
+            'https://www.shiasource.com/audio/adhaan/' \
+            'https://www.shiasource.com/audio/category/adhaan/'; do
+            echo "FETCH PAGE: $page"
             curl -A 'Mozilla/5.0' -L --fail --retry 2 --retry-delay 1 "$page" >> /tmp/shia-adhan-pages.html || true
           done
           python3 - <<'PY' > /tmp/shia-audio-candidates.txt
@@ -48,12 +53,16 @@ jobs:
           from urllib.parse import urljoin
           s=html.unescape(Path('/tmp/shia-adhan-pages.html').read_text(encoding='utf-8',errors='ignore')).replace('\\/','/')
           found=[]
-          pats=[r'https?://[^"\'<> ]+\.(?:mp3|m4a|ogg)(?:\?[^"\'<> ]*)?',r'/(?:[^"\'<> ]*/)*[^"\'<> ]+\.(?:mp3|m4a|ogg)(?:\?[^"\'<> ]*)?']
+          pats=[
+            r'https?://[^"\'<> ]+\.(?:mp3|m4a|ogg)(?:\?[^"\'<> ]*)?',
+            r'/(?:[^"\'<> ]*/)*[^"\'<> ]+\.(?:mp3|m4a|ogg)(?:\?[^"\'<> ]*)?'
+          ]
           for pat in pats:
               for x in re.findall(pat,s,re.I):
-                  u=urljoin('https://www.shiasource.com/',x)
-                  if u not in found: found.append(u)
-          found.sort(key=lambda u:(0 if any(k in u.lower() for k in ('adhan','adhaan','azan','halawaji','ridhayan','zadeh','ghalwash')) else 1,u))
+                  for base in ('https://shiavoice.com/','https://www.shiasource.com/'):
+                      u=urljoin(base,x)
+                      if u not in found: found.append(u)
+          found.sort(key=lambda u:(0 if 'shiavoice' in u else 1,u))
           print('\n'.join(found))
           PY
           echo 'Shia audio candidates:'
@@ -66,8 +75,7 @@ jobs:
               if [ "$bytes" -gt 100000 ]; then
                 if python3 - <<'PY'
           from pathlib import Path
-          p=Path('/tmp/candidate-audio')
-          h=p.read_bytes()[:16]
+          h=Path('/tmp/candidate-audio').read_bytes()[:16]
           assert h[:3]==b'ID3' or h[:1]==b'\xff' or h[4:8]==b'ftyp' or h[:4]==b'OggS'
           PY
                 then
