@@ -45,14 +45,14 @@ jobs:
         run: |
           mkdir -p nadaye-out
           BT="$ANDROID_HOME/build-tools/35.0.0"
-          "$BT/zipalign" -f 4 nadaye-android/app/build/outputs/apk/release/app-release-unsigned.apk nadaye-out/Nadaye-Beheshti-5.0-aligned-unsigned.apk
-          "$BT/aapt" dump badging nadaye-out/Nadaye-Beheshti-5.0-aligned-unsigned.apk > nadaye-out/APK-BADGING.txt
+          "$BT/zipalign" -f 4 nadaye-android/app/build/outputs/apk/release/app-release-unsigned.apk nadaye-out/Nadaye-Beheshti-5.1-aligned-unsigned.apk
+          "$BT/aapt" dump badging nadaye-out/Nadaye-Beheshti-5.1-aligned-unsigned.apk > nadaye-out/APK-BADGING.txt
           cp "$BT/lib/apksigner.jar" nadaye-out/apksigner.jar
-          printf 'Package: com.nadaye.beheshti\nVersion: 5.0\nVersionCode: 20\nCentral app: https://app-hs2thc.v2.appdeploy.ai/\n' > nadaye-out/BUILD-INFO.txt
-          unzip -t nadaye-out/Nadaye-Beheshti-5.0-aligned-unsigned.apk
+          printf 'Package: com.nadaye.beheshti\nVersion: 5.1\nVersionCode: 21\nCentral app: https://app-hs2thc.v2.appdeploy.ai/\nCentral sync build: 51\n' > nadaye-out/BUILD-INFO.txt
+          unzip -t nadaye-out/Nadaye-Beheshti-5.1-aligned-unsigned.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: nadaye-beheshti-5-final-unsigned
+          name: nadaye-beheshti-5.1-final-unsigned
           path: nadaye-out/
           if-no-files-found: error
           retention-days: 7
