@@ -88,8 +88,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unzip -l Nadaye-Beheshti-2.0.apk | grep -E 'leader_hero|adhan_default|quran.json' >/dev/null
           test $(stat -c%s Nadaye-Beheshti-2.0.apk) -gt 1000000
+          unzip -l Nadaye-Beheshti-2.0.apk | grep 'assets/quran.json' >/dev/null
+          unzip -p Nadaye-Beheshti-2.0.apk assets/quran.json > /tmp/quran-packed.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/quran-packed.json',encoding='utf-8'))
+          assert len(d)==114 and sum(len(x.get('verses',[])) for x in d)>=6200
+          PY
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          "$AAPT" dump badging Nadaye-Beheshti-2.0.apk | grep "package: name='com.nadaye.beheshti'" >/dev/null
           sha256sum Nadaye-Beheshti-2.0.apk > APK-SHA256.txt
           echo 'APK smoke checks passed'
 
