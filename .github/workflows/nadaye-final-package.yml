@@ -1,4 +1,4 @@
-name: Package Nadaye Beheshti v4.8 final
+name: Package Nadaye Beheshti v4.9 final
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Restore validated v4.7 source and apply central fix
+      - name: Restore validated v4.7 source and apply central bridge fixes
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,16 +39,17 @@ jobs:
             cp android-nadaye/app/src/main/res/drawable/ic_launcher.xml android-nadaye/app/src/main/res/drawable/leader_hero.xml
           fi
           python3 android-hardening/v48_central_fix.py
+          python3 android-hardening/v49_webview_bridge.py
           python3 - <<'PY'
           from pathlib import Path
           import re
           g=Path('android-nadaye/app/build.gradle')
           s=g.read_text(encoding='utf-8')
-          s=re.sub(r'versionCode\s+\d+','versionCode 13',s)
-          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]","versionName '4.8.0'",s)
+          s=re.sub(r'versionCode\s+\d+','versionCode 14',s)
+          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]","versionName '4.9.0'",s)
           g.write_text(s,encoding='utf-8')
           p=Path('android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java')
-          s=p.read_text(encoding='utf-8').replace('نسخه ۴.۷','نسخه ۴.۸')
+          s=p.read_text(encoding='utf-8').replace('نسخه ۴.۷','نسخه ۴.۹').replace('نسخه ۴.۸','نسخه ۴.۹')
           p.write_text(s,encoding='utf-8')
           PY
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
@@ -68,13 +69,16 @@ jobs:
           assert a.stat().st_size>100000 and a.read_bytes()[:4]==b'OggS'
           PY
           cp android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java generated-MainActivity.java
-          grep -q 'versionCode 13' android-nadaye/app/build.gradle
-          grep -q "versionName '4.8.0'" android-nadaye/app/build.gradle
+          grep -q 'versionCode 14' android-nadaye/app/build.gradle
+          grep -q "versionName '4.9.0'" android-nadaye/app/build.gradle
           grep -q 'showTopTitleEditor' generated-MainActivity.java
           grep -q 'heroDisplayHeight' generated-MainActivity.java
           grep -q 'centralPinHash' generated-MainActivity.java
           grep -q 'owner/recover-legacy' generated-MainActivity.java
           grep -q 'server_verification_failed' generated-MainActivity.java
+          grep -q 'nativeBridge=1&v=49' generated-MainActivity.java
+          grep -q '/api/asset-chunk' generated-MainActivity.java
+          grep -q '/api/asset-finalize' generated-MainActivity.java
 
       - name: Build final APK
         working-directory: android-nadaye
@@ -89,18 +93,18 @@ jobs:
           ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign -type f | sort -V | tail -1)
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
-          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-4.8-Final-Unsigned.apk
-          unzip -t Nadaye-Beheshti-4.8-Final-Unsigned.apk >/dev/null
-          "$AAPT" dump badging Nadaye-Beheshti-4.8-Final-Unsigned.apk > badging.txt
-          grep -F "package: name='com.nadaye.beheshti' versionCode='13' versionName='4.8.0'" badging.txt
-          sha256sum Nadaye-Beheshti-4.8-Final-Unsigned.apk > SHA256.txt
+          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-4.9-Final-Unsigned.apk
+          unzip -t Nadaye-Beheshti-4.9-Final-Unsigned.apk >/dev/null
+          "$AAPT" dump badging Nadaye-Beheshti-4.9-Final-Unsigned.apk > badging.txt
+          grep -F "package: name='com.nadaye.beheshti' versionCode='14' versionName='4.9.0'" badging.txt
+          sha256sum Nadaye-Beheshti-4.9-Final-Unsigned.apk > SHA256.txt
           cp "$APKSIGNER_JAR" apksigner.jar
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Nadaye-Beheshti-4.8-Final-Unsigned
+          name: Nadaye-Beheshti-4.9-Final-Unsigned
           path: |
-            Nadaye-Beheshti-4.8-Final-Unsigned.apk
+            Nadaye-Beheshti-4.9-Final-Unsigned.apk
             apksigner.jar
             SHA256.txt
             badging.txt
