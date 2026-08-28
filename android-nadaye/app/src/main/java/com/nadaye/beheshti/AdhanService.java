@@ -6,17 +6,10 @@ import android.media.*;
 import android.net.Uri;
 import android.os.*;
 
-import java.io.File;
-
 public class AdhanService extends Service {
     static final String CHANNEL="nadaye_adhan";
     static final String STOP="com.nadaye.beheshti.STOP_ADHAN";
-    static final String[] BUILTIN_URLS={
-            "https://shiavoice.com/stream-0wonG",
-            "https://shiavoice.com/stream-j7q3b",
-            "https://shiavoice.com/stream-7Lntd",
-            "https://shiavoice.com/stream-EPfRi"
-    };
+    static final int[] BUILTIN_RAW={R.raw.default_adhan,R.raw.adhan_beautiful,R.raw.adhan_azan};
 
     MediaPlayer player;
     AudioManager audio;
@@ -46,7 +39,7 @@ public class AdhanService extends Service {
         Intent si=new Intent(this,AdhanService.class);si.setAction(STOP);
         PendingIntent stop=PendingIntent.getService(this,991,si,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
-        b.setSmallIcon(com.nadaye.beheshti.R.drawable.ic_launcher)
+        b.setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle("ندای بهشتی — "+label)
                 .setContentText("اذان در حال پخش است")
                 .setCategory(Notification.CATEGORY_ALARM)
@@ -82,25 +75,21 @@ public class AdhanService extends Service {
 
     Uri selectedUri(){
         SharedPreferences p=getSharedPreferences("nadaye",MODE_PRIVATE);
-        int selected=p.getInt("adhan.selected",1);
-        if(selected>=0&&selected<BUILTIN_URLS.length){
-            File cached=new File(getFilesDir(),"adhan_builtin_"+selected+".audio");
-            if(cached.exists()&&cached.length()>100000)return Uri.fromFile(cached);
-            return Uri.parse(BUILTIN_URLS[selected]);
+        int selected=p.getInt("adhan.selected",0);
+        if(selected>=0&&selected<BUILTIN_RAW.length){
+            return Uri.parse("android.resource://"+getPackageName()+"/"+BUILTIN_RAW[selected]);
         }
-        int slot=selected-BUILTIN_URLS.length+1;
+        int slot=selected-BUILTIN_RAW.length+1;
         if(slot>=1&&slot<=8){
             String custom=p.getString("adhan.slot."+slot+".uri","");
             if(!custom.isEmpty())return Uri.parse(custom);
         }
-        return null;
+        return Uri.parse("android.resource://"+getPackageName()+"/"+R.raw.default_adhan);
     }
 
     void playSelected(){
         fallbackTried=false;
-        Uri u=selectedUri();
-        if(u==null){playFallback();return;}
-        startUri(u,false);
+        startUri(selectedUri(),false);
     }
 
     void startUri(Uri u,boolean fallback){
@@ -123,10 +112,8 @@ public class AdhanService extends Service {
     }
 
     void playFallback(){
-        try{
-            Uri u=Uri.parse("android.resource://"+getPackageName()+"/"+com.nadaye.beheshti.R.raw.default_adhan);
-            startUri(u,true);
-        }catch(Exception e){stopNow();}
+        Uri u=Uri.parse("android.resource://"+getPackageName()+"/"+R.raw.default_adhan);
+        startUri(u,true);
     }
 
     void stopNow(){
