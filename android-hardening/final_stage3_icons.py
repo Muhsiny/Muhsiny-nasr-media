@@ -6,9 +6,9 @@ s=p.read_text(encoding='utf-8')
 # replace the old hand-drawn feature/top/bottom defaults. Owner overrides still work.
 anchor='    GradientDrawable pillBg(int fill,int strokeColor){'
 assert anchor in s
-helper=r'''    Drawable proIcon(String key,int color){
+helper=r'''    android.graphics.drawable.Drawable proIcon(String key,int color){
         final int c=color;
-        return new Drawable(){Paint p=new Paint(3);Path q=new Path();@Override public void draw(Canvas x){float w=getBounds().width(),h=getBounds().height(),cx=w/2f,cy=h/2f,u=Math.min(w,h)/24f;p.setColor(c);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(Math.max(1.7f,u*1.55f));p.setStrokeCap(Paint.Cap.ROUND);p.setStrokeJoin(Paint.Join.ROUND);q.reset();
+        return new android.graphics.drawable.Drawable(){Paint p=new Paint(3);Path q=new Path();@Override public void draw(Canvas x){float w=getBounds().width(),h=getBounds().height(),cx=w/2f,cy=h/2f,u=Math.min(w,h)/24f;p.setColor(c);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(Math.max(1.7f,u*1.55f));p.setStrokeCap(Paint.Cap.ROUND);p.setStrokeJoin(Paint.Join.ROUND);q.reset();
             if("quran".equals(key)){x.drawLine(cx,cy-7*u,cx,cy+8*u,p);q.moveTo(cx,cy-6*u);q.cubicTo(cx-4*u,cy-9*u,cx-9*u,cy-8*u,cx-10*u,cy-5*u);q.lineTo(cx-10*u,cy+7*u);q.cubicTo(cx-6*u,cy+5*u,cx-3*u,cy+6*u,cx,cy+9*u);x.drawPath(q,p);q.reset();q.moveTo(cx,cy-6*u);q.cubicTo(cx+4*u,cy-9*u,cx+9*u,cy-8*u,cx+10*u,cy-5*u);q.lineTo(cx+10*u,cy+7*u);q.cubicTo(cx+6*u,cy+5*u,cx+3*u,cy+6*u,cx,cy+9*u);x.drawPath(q,p);}
             else if("duas".equals(key)){x.drawCircle(cx-5*u,cy-5*u,2.1f*u,p);x.drawCircle(cx+5*u,cy-5*u,2.1f*u,p);q.moveTo(cx-8*u,cy+8*u);q.cubicTo(cx-9*u,cy+2*u,cx-6*u,cy,cx-3*u,cy+3*u);q.moveTo(cx+8*u,cy+8*u);q.cubicTo(cx+9*u,cy+2*u,cx+6*u,cy,cx+3*u,cy+3*u);q.moveTo(cx-3*u,cy+3*u);q.cubicTo(cx-1*u,cy+6*u,cx+1*u,cy+6*u,cx+3*u,cy+3*u);x.drawPath(q,p);}
             else if("adhan".equals(key)){q.moveTo(cx-9*u,cy+8*u);q.lineTo(cx-9*u,cy-1*u);q.quadTo(cx,cy-11*u,cx+9*u,cy-1*u);q.lineTo(cx+9*u,cy+8*u);q.moveTo(cx-12*u,cy+8*u);q.lineTo(cx+12*u,cy+8*u);q.moveTo(cx+6*u,cy-5*u);q.lineTo(cx+6*u,cy-10*u);x.drawPath(q,p);x.drawCircle(cx+6*u,cy-12*u,1.2f*u,p);}
