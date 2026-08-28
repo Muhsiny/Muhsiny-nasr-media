@@ -150,8 +150,9 @@ jobs:
           APK='Nadaye-Beheshti-4.2-aligned-unsigned.apk'
           test -s "$APK"
           unzip -t "$APK" >/dev/null
-          unzip -l "$APK" | grep -F 'assets/quran.json' >/dev/null
-          unzip -l "$APK" | grep -F 'res/raw/default_adhan.ogg' >/dev/null
+          unzip -Z1 "$APK" > /tmp/apk-list.txt
+          grep -Fx 'assets/quran.json' /tmp/apk-list.txt >/dev/null
+          grep -Fx 'res/raw/default_adhan.ogg' /tmp/apk-list.txt >/dev/null
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           "$AAPT" dump badging "$APK" | tee /tmp/badging.txt
           grep -F "package: name='com.nadaye.beheshti' versionCode='7' versionName='4.2.0'" /tmp/badging.txt >/dev/null
