@@ -15,3 +15,44 @@ jobs:
           cache: npm
       - run: npm install
       - run: npm run build
+
+  nadaye_android:
+    if: github.event_name == 'pull_request' && github.head_ref == 'nadaye-beheshti-final-build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Install Android 35
+        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0' >/dev/null
+      - name: Bundle default offline adhan
+        run: |
+          mkdir -p nadaye-android/app/src/main/res/raw
+          curl -fL --retry 3 'https://raw.githubusercontent.com/Kiwifu/adhan-mp3/main/Mishary_Al_Afasy_-_HQ_(%D9%85%D8%B4%D8%A7%D8%B1%D9%8A_%D8%A7%D9%84%D8%B9%D9%81%D8%A7%D8%B3%D9%8A).mp3' -o nadaye-android/app/src/main/res/raw/adhan_default.mp3
+          test -s nadaye-android/app/src/main/res/raw/adhan_default.mp3
+      - name: Build release APK
+        run: gradle -p nadaye-android clean assembleRelease --stacktrace
+      - name: Align and inspect APK
+        run: |
+          mkdir -p nadaye-out
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          "$BT/zipalign" -f 4 nadaye-android/app/build/outputs/apk/release/app-release-unsigned.apk nadaye-out/Nadaye-Beheshti-5.0-aligned-unsigned.apk
+          "$BT/aapt" dump badging nadaye-out/Nadaye-Beheshti-5.0-aligned-unsigned.apk > nadaye-out/APK-BADGING.txt
+          cp "$BT/lib/apksigner.jar" nadaye-out/apksigner.jar
+          printf 'Package: com.nadaye.beheshti\nVersion: 5.0\nVersionCode: 20\nCentral app: https://app-hs2thc.v2.appdeploy.ai/\n' > nadaye-out/BUILD-INFO.txt
+          unzip -t nadaye-out/Nadaye-Beheshti-5.0-aligned-unsigned.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nadaye-beheshti-5-final-unsigned
+          path: nadaye-out/
+          if-no-files-found: error
+          retention-days: 7
