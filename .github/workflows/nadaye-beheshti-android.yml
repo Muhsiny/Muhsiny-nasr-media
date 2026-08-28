@@ -25,8 +25,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/4ZkIyeQiuRpMdLNN' -o /tmp/nadaye-v4.zip
-          echo 'd7dff647a848f7da30f1b5a673703e202ee3ddbfde01c7c7500c626702e410af  /tmp/nadaye-v4.zip' | sha256sum -c -
+          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/HgJDzVBNE1bRgxBZ' -o /tmp/nadaye-v4.zip
+          echo '7c42789ac71b54cbb20a6a31ec1f2c77df93cff4c0a6de5d4e1e24f62f8f40e6  /tmp/nadaye-v4.zip' | sha256sum -c -
           unzip -o /tmp/nadaye-v4.zip -d android-nadaye
           grep -q 'void showAdminStudio()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'hiddenTapCount>=7' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
