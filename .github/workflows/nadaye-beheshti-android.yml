@@ -1,4 +1,4 @@
-name: Build Nadaye Beheshti Android v3.1 layout fix
+name: Build Nadaye Beheshti Android v4 premium
 
 on:
   push:
@@ -21,23 +21,23 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Apply final v3.1 source overlay
+      - name: Apply premium v4 source overlay
         shell: bash
         run: |
           set -euo pipefail
-          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/b0YnUAnDvE7Ejaef' -o /tmp/nadaye-v31.zip
-          echo '25707e7fd6b68529096e7fdc0772e4ceffcfdb3242a1556896cd945b1bf10a2a  /tmp/nadaye-v31.zip' | sha256sum -c -
-          unzip -o /tmp/nadaye-v31.zip -d android-nadaye
+          curl -L --fail --retry 3 --retry-delay 2 'https://at.adobe.com/COrp3Ce6MG8xH2jf' -o /tmp/nadaye-v4.zip
+          echo 'f0e07c4f3417e35df1f6facd010411966295d689a69e53a58b26afb1e8cac57d  /tmp/nadaye-v4.zip' | sha256sum -c -
+          unzip -o /tmp/nadaye-v4.zip -d android-nadaye
           grep -q 'void showAdminStudio()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'hiddenTapCount>=7' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          grep -q 'class FeatureIconView' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          grep -q 'View makeBottomNav()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          grep -q 'void startHomeTicker()' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'builtInAdhanNames' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
-          grep -q 'lp.gravity=Gravity.TOP|Gravity.LEFT' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
-          grep -q 'homeRoot.setLayoutDirection(View.LAYOUT_DIRECTION_RTL)' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
           grep -q 'stream-0wonG' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
-          grep -q 'stream-j7q3b' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
-          grep -q 'stream-7Lntd' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
-          grep -q 'stream-EPfRi' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
-          echo 'Owner studio, Shia muezzins and RTL absolute-layout fix are present.'
+          grep -q 'android.intent.action.TIMEZONE_CHANGED' android-nadaye/app/src/main/AndroidManifest.xml
+          ! grep -q 'FIT_XY' android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
+          echo 'Premium responsive home, owner studio, Shia muezzins and resilient alarm receivers are present.'
 
       - name: Prepare verified offline Quran text
         shell: bash
@@ -53,6 +53,7 @@ jobs:
           assert isinstance(d,list) and len(d)==114
           verses=sum(len(x.get('verses',[])) for x in d)
           assert verses>=6200
+          assert d[0]['verses'][0]['text'].strip()
           hero=Path('android-nadaye/app/src/main/res/drawable-nodpi/leader_hero.jpg')
           assert hero.exists() and hero.stat().st_size>10000
           print('Validated Quran:',len(d),'surahs /',verses,'verses; hero:',hero.stat().st_size,'bytes')
@@ -72,27 +73,29 @@ jobs:
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
           test -x "$ZIPALIGN"
           test -s "$APKSIGNER_JAR"
-          "$ZIPALIGN" -f 4 "$UNSIGNED" Nadaye-Beheshti-3.1-aligned-unsigned.apk
+          "$ZIPALIGN" -f 4 "$UNSIGNED" Nadaye-Beheshti-4.0-aligned-unsigned.apk
           cp "$APKSIGNER_JAR" apksigner.jar
 
       - name: Smoke check unsigned APK
         shell: bash
         run: |
           set -euo pipefail
-          test -s Nadaye-Beheshti-3.1-aligned-unsigned.apk
-          unzip -t Nadaye-Beheshti-3.1-aligned-unsigned.apk >/dev/null
-          unzip -l Nadaye-Beheshti-3.1-aligned-unsigned.apk | grep 'assets/quran.json' >/dev/null
+          test -s Nadaye-Beheshti-4.0-aligned-unsigned.apk
+          unzip -t Nadaye-Beheshti-4.0-aligned-unsigned.apk >/dev/null
+          unzip -l Nadaye-Beheshti-4.0-aligned-unsigned.apk | grep 'assets/quran.json' >/dev/null
+          unzip -l Nadaye-Beheshti-4.0-aligned-unsigned.apk | grep 'leader_hero' >/dev/null
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
-          "$AAPT" dump badging Nadaye-Beheshti-3.1-aligned-unsigned.apk | grep "package: name='com.nadaye.beheshti'" >/dev/null
-          "$AAPT" dump badging Nadaye-Beheshti-3.1-aligned-unsigned.apk | grep "versionCode='4'" >/dev/null
-          sha256sum Nadaye-Beheshti-3.1-aligned-unsigned.apk > UNSIGNED-SHA256.txt
+          "$AAPT" dump badging Nadaye-Beheshti-4.0-aligned-unsigned.apk | grep "package: name='com.nadaye.beheshti'" >/dev/null
+          "$AAPT" dump badging Nadaye-Beheshti-4.0-aligned-unsigned.apk | grep "versionCode='5'" >/dev/null
+          "$AAPT" dump badging Nadaye-Beheshti-4.0-aligned-unsigned.apk | grep "versionName='4.0.0'" >/dev/null
+          sha256sum Nadaye-Beheshti-4.0-aligned-unsigned.apk > UNSIGNED-SHA256.txt
           echo 'Unsigned APK smoke checks passed'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Nadaye-Beheshti-3.1-Unsigned
+          name: Nadaye-Beheshti-4.0-Unsigned
           path: |
-            Nadaye-Beheshti-3.1-aligned-unsigned.apk
+            Nadaye-Beheshti-4.0-aligned-unsigned.apk
             apksigner.jar
             UNSIGNED-SHA256.txt
           if-no-files-found: error
