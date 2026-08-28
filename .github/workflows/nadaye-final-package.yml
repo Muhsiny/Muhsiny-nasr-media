@@ -26,8 +26,37 @@ jobs:
           if curl -L --fail --retry 2 'https://at.adobe.com/KYtdZd634HeDuZGm' -o /tmp/premium.zip; then
             echo 'e7e4a578e91f119d7164eba0e9cdc3ca6de7014a09a353f821467c9b53492237  /tmp/premium.zip' | sha256sum -c -
           else
-            echo 'Adobe overlay unavailable; using repository-bundled overlay parts.'
-            cat android-nadaye/v2-overlay-parts/part*.b64 | base64 --decode --ignore-garbage > /tmp/premium.zip
+            echo 'Adobe overlay unavailable; repairing repository-bundled overlay parts.'
+            python3 - <<'PY'
+          from pathlib import Path
+          import base64, io, zipfile
+          parts=sorted(Path('android-nadaye/v2-overlay-parts').glob('part*.b64'))
+          chunks=[''.join(p.read_text(encoding='ascii').split()) for p in parts]
+          raw=''.join(chunks)
+          def good(x):
+              try:
+                  data=base64.b64decode(x,validate=True)
+                  with zipfile.ZipFile(io.BytesIO(data)) as z:
+                      return data if z.testzip() is None else None
+              except Exception:
+                  return None
+          data=good(raw)
+          if data is None:
+              alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+              boundaries=[]; n=0
+              for c in chunks[:-1]:
+                  n+=len(c); boundaries.append(n)
+              for pos in boundaries:
+                  for ch in alphabet:
+                      data=good(raw[:pos]+ch+raw[pos:])
+                      if data is not None:
+                          print('Recovered bundled overlay at boundary',pos)
+                          break
+                  if data is not None: break
+          if data is None:
+              raise SystemExit('Could not reconstruct bundled overlay')
+          Path('/tmp/premium.zip').write_bytes(data)
+          PY
             unzip -t /tmp/premium.zip >/dev/null
           fi
           unzip -o /tmp/premium.zip -d android-nadaye
