@@ -125,6 +125,8 @@ jobs:
           grep -F "package: name='com.nadaye.beheshti' versionCode='16' versionName='5.1.0'" badging.txt
           sha256sum Nadaye-Beheshti-5.1-Final-Unsigned.apk > SHA256.txt
           cp "$APKSIGNER_JAR" apksigner.jar
+          cp "$ZIPALIGN" zipalign
+          chmod +x zipalign
 
       - uses: actions/upload-artifact@v4
         with:
@@ -132,6 +134,7 @@ jobs:
           path: |
             Nadaye-Beheshti-5.1-Final-Unsigned.apk
             apksigner.jar
+            zipalign
             SHA256.txt
             badging.txt
             cover-entry.txt
