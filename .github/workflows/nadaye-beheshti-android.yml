@@ -30,10 +30,11 @@ jobs:
           unzip -o /tmp/nadaye-v2.zip -d android-nadaye
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('android-nadaye/app/src/main/java/com/nadaye/beheshti/AlarmReceiver.java')
-          s = p.read_text(encoding='utf-8')
-          s = s.replace('import android.os.Build;\\nimport android.provider.Settings;', 'import android.os.Build;\nimport android.provider.Settings;')
-          p.write_text(s, encoding='utf-8')
+          root = Path('android-nadaye/app/src/main/java/com/nadaye/beheshti')
+          for p in root.glob('*.java'):
+              s = p.read_text(encoding='utf-8')
+              s = s.replace(';\\nimport ', ';\nimport ')
+              p.write_text(s, encoding='utf-8')
           PY
 
       - name: Prepare verified offline Quran and default adhan
