@@ -1,4 +1,4 @@
-name: Package Nadaye Beheshti v4.4 final
+name: Package Nadaye Beheshti v4.5 final
 
 on:
   push:
@@ -31,13 +31,14 @@ jobs:
           cat android-hardening/v44_part1.py android-hardening/v44_part2.py android-hardening/v44_part3.py > /tmp/v44_upgrade.py
           python3 -m py_compile /tmp/v44_upgrade.py
           python3 /tmp/v44_upgrade.py
+          python3 android-hardening/v45_cover.py
           python3 - <<'PY'
           from pathlib import Path
           import re
           g=Path('android-nadaye/app/build.gradle')
           s=g.read_text(encoding='utf-8')
-          s=re.sub(r'versionCode\s+\d+','versionCode 9',s)
-          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]","versionName '4.4.0'",s)
+          s=re.sub(r'versionCode\s+\d+','versionCode 10',s)
+          s=re.sub(r"versionName\s+['\"][^'\"]+['\"]","versionName '4.5.0'",s)
           g.write_text(s,encoding='utf-8')
           PY
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
@@ -57,13 +58,14 @@ jobs:
           assert a.stat().st_size>100000 and a.read_bytes()[:4]==b'OggS'
           PY
           cp android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java generated-MainActivity.java
-          grep -q 'versionCode 9' android-nadaye/app/build.gradle
-          grep -q "versionName '4.4.0'" android-nadaye/app/build.gradle
+          grep -q 'versionCode 10' android-nadaye/app/build.gradle
+          grep -q "versionName '4.5.0'" android-nadaye/app/build.gradle
           grep -q 'showIconEditor' generated-MainActivity.java
           grep -q 'showBeheshtiEditor' generated-MainActivity.java
           grep -q 'showSpiritualTreasury' generated-MainActivity.java
           grep -q 'JUSTIFICATION_MODE_INTER_WORD' generated-MainActivity.java
           grep -q 'theme.heroCoverPath' generated-MainActivity.java
+          grep -q 'cover.setScaleType(ImageView.ScaleType.FIT_CENTER)' generated-MainActivity.java
 
       - name: Build final APK
         working-directory: android-nadaye
@@ -78,18 +80,18 @@ jobs:
           ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign -type f | sort -V | tail -1)
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           APKSIGNER_JAR=$(find "$ANDROID_HOME/build-tools" -path '*/lib/apksigner.jar' -type f | sort -V | tail -1)
-          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-4.4-Final-Unsigned.apk
-          unzip -t Nadaye-Beheshti-4.4-Final-Unsigned.apk >/dev/null
-          "$AAPT" dump badging Nadaye-Beheshti-4.4-Final-Unsigned.apk > badging.txt
-          grep -F "package: name='com.nadaye.beheshti' versionCode='9' versionName='4.4.0'" badging.txt
-          sha256sum Nadaye-Beheshti-4.4-Final-Unsigned.apk > SHA256.txt
+          "$ZIPALIGN" -f 4 "$SRC" Nadaye-Beheshti-4.5-Final-Unsigned.apk
+          unzip -t Nadaye-Beheshti-4.5-Final-Unsigned.apk >/dev/null
+          "$AAPT" dump badging Nadaye-Beheshti-4.5-Final-Unsigned.apk > badging.txt
+          grep -F "package: name='com.nadaye.beheshti' versionCode='10' versionName='4.5.0'" badging.txt
+          sha256sum Nadaye-Beheshti-4.5-Final-Unsigned.apk > SHA256.txt
           cp "$APKSIGNER_JAR" apksigner.jar
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Nadaye-Beheshti-4.4-Final-Unsigned
+          name: Nadaye-Beheshti-4.5-Final-Unsigned
           path: |
-            Nadaye-Beheshti-4.4-Final-Unsigned.apk
+            Nadaye-Beheshti-4.5-Final-Unsigned.apk
             apksigner.jar
             SHA256.txt
             badging.txt
