@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 40
     permissions:
       actions: read
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -21,6 +21,26 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+
+      - name: Permanently seed and verify exact locked cover
+        shell: bash
+        run: |
+          set -euo pipefail
+          COVER='android-nadaye/app/src/main/res/drawable-nodpi/nadaye_locked_cover.jpg'
+          EXPECT='09018d78fb1b1c167d3b76566754287b613091fc60ed3e39fe7221f9ccffedec'
+          mkdir -p "$(dirname "$COVER")"
+          if ! test -s "$COVER" || ! echo "$EXPECT  $COVER" | sha256sum -c - >/dev/null 2>&1; then
+            curl -L --fail --retry 3 'https://at.adobe.com/UjitNGagdCzWIpEp' -o "$COVER"
+          fi
+          echo "$EXPECT  $COVER" | sha256sum -c -
+          test "$(stat -c%s "$COVER")" = '267975'
+          if [ -n "$(git status --porcelain -- "$COVER")" ]; then
+            git config user.name 'Nadaye Release Bot'
+            git config user.email 'actions@users.noreply.github.com'
+            git add "$COVER"
+            git commit -m 'Embed exact locked Nadaye cover asset'
+            git push origin HEAD:nadaye-beheshti-android
+          fi
 
       - name: Restore validated base and bake final public features
         shell: bash
@@ -36,12 +56,7 @@ jobs:
           unzip -j -o /tmp/v47-artifact.zip generated-MainActivity.java -d /tmp
           cp /tmp/generated-MainActivity.java android-nadaye/app/src/main/java/com/nadaye/beheshti/MainActivity.java
 
-          python3 android-hardening/v48_central_fix.py
-          python3 android-hardening/v49_webview_bridge.py
-          python3 android-hardening/v50_direct_lovable.py
-
-          mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw android-nadaye/app/src/main/res/drawable
-          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Example.jpg' -o android-nadaye/app/src/main/res/drawable/nadaye_locked_cover.jpg
+          mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf' -o android-nadaye/app/src/main/assets/amiri_regular.ttf
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/OFL.txt' -o android-nadaye/app/src/main/assets/AMIRI-OFL.txt
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/risan/quran-json/main/dist/quran.json' -o android-nadaye/app/src/main/assets/quran.json
@@ -53,7 +68,7 @@ jobs:
             {"type":"زندگی‌نامه","title":"آیت‌الله سیدعلی بهشتی","body":"آیت‌الله سیدعلی بهشتی از عالمان و رهبران اجتماعی افغانستان بود که بخش مهمی از زندگی خود را در آموزش دینی، سامان‌دهی امور اجتماعی و تلاش برای همبستگی جامعه سپری کرد."},
             {"type":"اندیشه‌ها","title":"منطق، گفت‌وگو و پرهیز از خشونت داخلی","body":"در روایت‌های برجای‌مانده از سیره او، بر حل اختلاف از راه منطق و گفت‌وگو تأکید شده است؛ رویکردی که حفظ وحدت اجتماعی و جلوگیری از درگیری داخلی را در مرکز توجه قرار می‌داد."},
             {"type":"زندگی‌نامه","title":"شورای اتفاق اسلامی افغانستان","body":"شورای اتفاق اسلامی افغانستان در سال ۱۳۵۸ در ورس شکل گرفت و در سال‌های جهاد، ساختارهای اداری، اجتماعی و دفاعی را در بخش‌هایی از مناطق مرکزی افغانستان سامان داد."},
-            {"type":"اندیشه‌ها","title":"خدمت، مسئولیت و وحدت","body":"در این برنامه، زندگی و اندیشه آیت‌الله بهشتی با محور خدمت عمومی، مسئولیت اجتماعی، دانش دینی و کوشش برای وحدت معرفی می‌شود. این کتابخانه در نسخه‌های بعدی نیز می‌تواند با منابع مستند تکمیل و ویرایش شود."}
+            {"type":"اندیشه‌ها","title":"خدمت، مسئولیت و وحدت","body":"این بخش با محور خدمت عمومی، مسئولیت اجتماعی، دانش دینی، گفت‌وگو و کوشش برای وحدت، زندگی و اندیشه آیت‌الله بهشتی را در اختیار خواننده قرار می‌دهد."}
           ]
           EOF
 
@@ -77,10 +92,11 @@ jobs:
           python3 android-hardening/v55_manifest_compat.py
           python3 android-hardening/v55_offline_hardening.py
           python3 android-hardening/v56_release_cleanup.py
+          python3 android-hardening/v58_no_legacy_central.py
 
           python3 - <<'PY'
           from pathlib import Path
-          import json,re
+          import json,re,hashlib
           g=Path('android-nadaye/app/build.gradle')
           s=g.read_text(encoding='utf-8')
           s=re.sub(r'versionCode\s+\d+','versionCode 17',s)
@@ -91,6 +107,9 @@ jobs:
           for old in ['نسخه ۴.۷','نسخه ۴.۸','نسخه ۴.۹','نسخه ۵.۰','نسخه ۵.۱']:
               s=s.replace(old,'نسخه ۵.۲')
           p.write_text(s,encoding='utf-8')
+          cover=Path('android-nadaye/app/src/main/res/drawable-nodpi/nadaye_locked_cover.jpg')
+          assert cover.stat().st_size==267975
+          assert hashlib.sha256(cover.read_bytes()).hexdigest()=='09018d78fb1b1c167d3b76566754287b613091fc60ed3e39fe7221f9ccffedec'
           q=json.loads(Path('android-nadaye/app/src/main/assets/quran.json').read_text(encoding='utf-8'))
           assert len(q)==114 and sum(len(x.get('verses',[])) for x in q)>=6200
           m=json.loads(Path('android-nadaye/app/src/main/assets/mafatih.json').read_text(encoding='utf-8'))
@@ -129,12 +148,17 @@ jobs:
           ! grep -q 'Central owner publishing' generated-MainActivity.java
           ! grep -q 'centralSyncAsync(false)' generated-MainActivity.java
           ! grep -q 'showCentralPublisher()' generated-MainActivity.java
+          ! grep -q 'CENTRAL_BASE' generated-MainActivity.java
+          ! grep -q 'appdeploy.ai' generated-MainActivity.java
+          ! grep -q 'lovable.app' generated-MainActivity.java
           ! grep -q 'هنوز مطلبی از پنل مالک افزوده نشده است' generated-MainActivity.java
           grep -q 'canScheduleExactAlarms' android-nadaye/app/src/main/java/com/nadaye/beheshti/AlarmReceiver.java
           grep -q 'REMOTE_SHIA' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
           grep -q 'BUILTIN_RAW={R.raw.default_adhan}' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
           grep -q 'STREAM_ALARM' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
           grep -q 'TIMEZONE_CHANGED' android-nadaye/app/src/main/AndroidManifest.xml
+          test ! -e android-nadaye/app/src/main/res/raw/adhan_beautiful.ogg
+          test ! -e android-nadaye/app/src/main/res/raw/adhan_azan.ogg
 
       - name: Build final APK
         working-directory: android-nadaye
