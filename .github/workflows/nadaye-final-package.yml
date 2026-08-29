@@ -74,6 +74,7 @@ jobs:
           python3 android-hardening/final_stage4_adhan_ui.py
           python3 android-hardening/v53_final_completion.py
           python3 android-hardening/v54_iranian_shia_adhan.py
+          python3 android-hardening/v55_manifest_compat.py
           python3 android-hardening/v55_offline_hardening.py
           python3 android-hardening/v56_release_cleanup.py
 
