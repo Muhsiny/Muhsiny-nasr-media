@@ -100,7 +100,9 @@ jobs:
           grep -q 'startQuranSurah' generated-MainActivity.java
           grep -q 'playQueuedAyah' generated-MainActivity.java
           grep -q 'builtinSpiritualAudio' generated-MainActivity.java
-          grep -q 'سه اذان کامل و بلند' generated-MainActivity.java
+          ! grep -q 'Central owner publishing' generated-MainActivity.java
+          ! grep -q 'centralSyncAsync(false)' generated-MainActivity.java
+          ! grep -q 'showCentralPublisher()' generated-MainActivity.java
           grep -q 'BUILTIN_RAW' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
           grep -q 'STREAM_ALARM' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
 
