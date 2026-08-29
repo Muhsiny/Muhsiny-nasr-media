@@ -67,6 +67,7 @@ jobs:
           python3 android-hardening/final_stage3_icons.py
           python3 android-hardening/final_stage4_core.py
           python3 android-hardening/final_stage4_adhan_ui.py
+          python3 android-hardening/v53_final_completion.py
 
           python3 - <<'PY'
           from pathlib import Path
@@ -84,6 +85,14 @@ jobs:
           assert len(q)==114 and sum(len(x.get('verses',[])) for x in q)>=6200
           m=json.loads(Path('android-nadaye/app/src/main/assets/mafatih.json').read_text(encoding='utf-8'))
           assert isinstance(m,list) and len(m)>0
+          titles=[]
+          for c in m:
+              for se in c.get('sections',[]) or []:
+                  for ar in se.get('articles',[]) or []:
+                      titles.append(ar.get('title',''))
+          joined='\n'.join(titles).replace('ي','ی').replace('ك','ک')
+          for need in ['توسل','عاشورا','کمیل','عهد']:
+              assert need in joined, need
           for f in ['default_adhan.ogg','adhan_beautiful.ogg','adhan_azan.ogg']:
               a=Path('android-nadaye/app/src/main/res/raw')/f
               assert a.stat().st_size>100000 and a.read_bytes()[:4]==b'OggS'
@@ -99,7 +108,9 @@ jobs:
           grep -q 'applyProIcon' generated-MainActivity.java
           grep -q 'startQuranSurah' generated-MainActivity.java
           grep -q 'playQueuedAyah' generated-MainActivity.java
-          grep -q 'builtinSpiritualAudio' generated-MainActivity.java
+          grep -q 'allMafatihArticles' generated-MainActivity.java
+          grep -q 'دعای توسل' generated-MainActivity.java
+          grep -q 'زیارت عاشورا' generated-MainActivity.java
           ! grep -q 'Central owner publishing' generated-MainActivity.java
           ! grep -q 'centralSyncAsync(false)' generated-MainActivity.java
           ! grep -q 'showCentralPublisher()' generated-MainActivity.java
