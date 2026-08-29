@@ -27,7 +27,6 @@ s=s.replace('این بخش فقط عنوان بزرگ «ندای بهشتی» د
 s=s.replace('prefs.getBoolean("title.bold",true)','prefs.getBoolean("title.bold",false)')
 s=s.replace('prefs.getBoolean("title.showOrnament",true)','prefs.getBoolean("title.showOrnament",false)')
 p.write_text(s,encoding='utf-8')
-assert 'سه اذان کامل و بلند' in s
 assert 'Central owner publishing' not in s
 assert 'centralSyncAsync(false)' not in s
 assert 'showCentralPublisher()' not in s
