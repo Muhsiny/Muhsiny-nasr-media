@@ -41,8 +41,6 @@ jobs:
           python3 android-hardening/v50_direct_lovable.py
 
           mkdir -p android-nadaye/app/src/main/assets android-nadaye/app/src/main/res/raw android-nadaye/app/src/main/res/drawable
-          # Compile-time cover is replaced byte-for-byte with the user's canonical cover before signing the public APK.
-          # Keep this tiny image only so aapt can create the stable drawable resource id in CI.
           curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Example.jpg' -o android-nadaye/app/src/main/res/drawable/nadaye_locked_cover.jpg
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf' -o android-nadaye/app/src/main/assets/amiri_regular.ttf
           curl -L --fail --retry 3 'https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/OFL.txt' -o android-nadaye/app/src/main/assets/AMIRI-OFL.txt
@@ -77,6 +75,7 @@ jobs:
           python3 android-hardening/v53_final_completion.py
           python3 android-hardening/v54_iranian_shia_adhan.py
           python3 android-hardening/v55_offline_hardening.py
+          python3 android-hardening/v56_release_cleanup.py
 
           python3 - <<'PY'
           from pathlib import Path
@@ -91,7 +90,6 @@ jobs:
           for old in ['نسخه ۴.۷','نسخه ۴.۸','نسخه ۴.۹','نسخه ۵.۰','نسخه ۵.۱']:
               s=s.replace(old,'نسخه ۵.۲')
           p.write_text(s,encoding='utf-8')
-
           q=json.loads(Path('android-nadaye/app/src/main/assets/quran.json').read_text(encoding='utf-8'))
           assert len(q)==114 and sum(len(x.get('verses',[])) for x in q)>=6200
           m=json.loads(Path('android-nadaye/app/src/main/assets/mafatih.json').read_text(encoding='utf-8'))
@@ -133,6 +131,7 @@ jobs:
           ! grep -q 'هنوز مطلبی از پنل مالک افزوده نشده است' generated-MainActivity.java
           grep -q 'canScheduleExactAlarms' android-nadaye/app/src/main/java/com/nadaye/beheshti/AlarmReceiver.java
           grep -q 'REMOTE_SHIA' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
+          grep -q 'BUILTIN_RAW={R.raw.default_adhan}' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
           grep -q 'STREAM_ALARM' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
           grep -q 'TIMEZONE_CHANGED' android-nadaye/app/src/main/AndroidManifest.xml
 
