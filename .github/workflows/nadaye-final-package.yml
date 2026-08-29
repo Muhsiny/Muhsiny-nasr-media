@@ -49,17 +49,17 @@ jobs:
           printf '%s\n' 'Mafatih text dataset: aminpaydar/Mafatih, Apache License 2.0.' > android-nadaye/app/src/main/assets/MAFATIH-LICENSE.txt
 
           command -v ffmpeg >/dev/null 2>&1 || { sudo apt-get update -y && sudo apt-get install -y ffmpeg; }
-          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Adhan.ogg' -o /tmp/adhan1.ogg
+          curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/%D8%A7%D8%B0%D8%A7%D9%86_%D8%AD%D8%B3%DB%8C%D9%86_%D8%B5%D8%A8%D8%AD%D8%AF%D9%84.webm' -o /tmp/adhan_iran.webm
           curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Beautiful_adhan.ogg' -o /tmp/adhan2.ogg
           curl -L --fail --retry 3 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Muslim_calling_to_prayer.ogg' -o /tmp/adhan3.ogg
-          ffmpeg -hide_banner -loglevel error -y -i /tmp/adhan1.ogg -af 'loudnorm=I=-14:TP=-1:LRA=7' -c:a libvorbis -q:a 6 android-nadaye/app/src/main/res/raw/default_adhan.ogg
+          ffmpeg -hide_banner -loglevel error -y -i /tmp/adhan_iran.webm -vn -af 'loudnorm=I=-14:TP=-1:LRA=7' -c:a libvorbis -q:a 6 android-nadaye/app/src/main/res/raw/default_adhan.ogg
           ffmpeg -hide_banner -loglevel error -y -i /tmp/adhan2.ogg -af 'loudnorm=I=-14:TP=-1:LRA=7' -c:a libvorbis -q:a 6 android-nadaye/app/src/main/res/raw/adhan_beautiful.ogg
           ffmpeg -hide_banner -loglevel error -y -i /tmp/adhan3.ogg -af 'loudnorm=I=-14:TP=-1:LRA=7' -c:a libvorbis -q:a 6 android-nadaye/app/src/main/res/raw/adhan_azan.ogg
           cat > android-nadaye/app/src/main/assets/ADHAN-LICENSE.txt <<'EOF'
-          Adhan.ogg — Wikimedia Commons — CC0 1.0 Universal.
-          Beautiful adhan.ogg — Adam-synagda — Wikimedia Commons — CC0 1.0 Universal.
-          Muslim calling to prayer.ogg — Aishatu98 — Wikimedia Commons — CC0 1.0 Universal.
-          The packaged copies have only loudness normalization applied for consistent alarm playback.
+          حسین صبحدل — اذان کامل ایرانی — Wikimedia Commons — CC BY-SA 4.0, VRT permission #2020110810007063. Audio extracted from the licensed WebM and loudness-normalized for alarm playback.
+          Beautiful adhan.ogg — Adam-synagda — Wikimedia Commons — CC0 1.0 Universal — fallback only.
+          Muslim calling to prayer.ogg — Aishatu98 — Wikimedia Commons — CC0 1.0 Universal — fallback only.
+          Online Shia profiles: مؤذن‌زاده اردبیلی, اباذر الحلواجي, سعید طوسی via ShiaVoice streams; if unavailable the app automatically falls back to the bundled حسین صبحدل file.
           EOF
 
           python3 android-hardening/v51_locked_cover.py
@@ -68,6 +68,7 @@ jobs:
           python3 android-hardening/final_stage4_core.py
           python3 android-hardening/final_stage4_adhan_ui.py
           python3 android-hardening/v53_final_completion.py
+          python3 android-hardening/v54_iranian_shia_adhan.py
 
           python3 - <<'PY'
           from pathlib import Path
@@ -111,10 +112,12 @@ jobs:
           grep -q 'allMafatihArticles' generated-MainActivity.java
           grep -q 'دعای توسل' generated-MainActivity.java
           grep -q 'زیارت عاشورا' generated-MainActivity.java
+          grep -q 'حسین صبحدل — ایران (آفلاین)' generated-MainActivity.java
+          grep -q 'مؤذن‌زاده اردبیلی — صوت‌الشیعه' generated-MainActivity.java
           ! grep -q 'Central owner publishing' generated-MainActivity.java
           ! grep -q 'centralSyncAsync(false)' generated-MainActivity.java
           ! grep -q 'showCentralPublisher()' generated-MainActivity.java
-          grep -q 'BUILTIN_RAW' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
+          grep -q 'REMOTE_SHIA' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
           grep -q 'STREAM_ALARM' android-nadaye/app/src/main/java/com/nadaye/beheshti/AdhanService.java
 
       - name: Build final APK
