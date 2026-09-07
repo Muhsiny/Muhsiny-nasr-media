@@ -1,4 +1,4 @@
-name: Test Farid Persian Neural Voice
+name: Test Persian Neural Voices
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  farid:
+  persian-voices:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,14 +19,22 @@ jobs:
           python-version: '3.11'
       - name: Install edge-tts
         run: python -m pip install --upgrade edge-tts
-      - name: Generate Farid Persian sample
+      - name: Generate Persian samples
         run: python tools/farid_neural_smoke.py
-      - name: Validate audio
+      - name: Validate audio files
         run: |
-          test -s farid-neural-fa-IR.mp3
-          ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 farid-neural-fa-IR.mp3
-      - name: Upload Farid sample
+          python - <<'PY'
+          from pathlib import Path
+          for name in ['farid-neural-fa-IR.mp3','dilara-neural-fa-IR.mp3']:
+              p=Path(name)
+              assert p.exists(), name
+              assert p.stat().st_size > 50000, (name,p.stat().st_size)
+              print('validated', name, p.stat().st_size)
+          PY
+      - name: Upload Persian voice samples
         uses: actions/upload-artifact@v4
         with:
-          name: farid-neural-fa-IR-sample
-          path: farid-neural-fa-IR.mp3
+          name: persian-neural-voice-samples
+          path: |
+            farid-neural-fa-IR.mp3
+            dilara-neural-fa-IR.mp3
