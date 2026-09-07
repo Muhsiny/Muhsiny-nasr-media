@@ -1,0 +1,51 @@
+name: Test Documentary Engine
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/documentary-studio-v1
+    paths:
+      - 'documentary-engine/**'
+      - '.github/workflows/documentary-engine-test.yml'
+
+jobs:
+  test-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Syntax check
+        run: python -m py_compile documentary-engine/server.py
+      - name: Start local engine
+        run: |
+          DOCSTUDIO_PORT=8190 python documentary-engine/server.py > /tmp/docstudio-engine.log 2>&1 &
+          echo $! > /tmp/docstudio-engine.pid
+      - name: Health check
+        run: |
+          python - <<'PY'
+          import json, time
+          from urllib.request import urlopen
+          last = None
+          for _ in range(20):
+              try:
+                  with urlopen('http://127.0.0.1:8190/system_stats', timeout=2) as r:
+                      data = json.load(r)
+                  assert data['ok'] is True
+                  assert data['service'] == 'Documentary Studio Local Engine'
+                  print(json.dumps(data, ensure_ascii=False, indent=2))
+                  break
+              except Exception as e:
+                  last = e
+                  time.sleep(.5)
+          else:
+              raise SystemExit(f'engine health check failed: {last}')
+          PY
+      - name: Package engine
+        run: tar -czf documentary-engine-v0.2.tar.gz documentary-engine
+      - uses: actions/upload-artifact@v4
+        with:
+          name: documentary-engine-v0.2
+          path: documentary-engine-v0.2.tar.gz
