@@ -1,7 +1,9 @@
 package af.muhsiny.docstudio
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
@@ -20,6 +22,8 @@ class MainActivity : Activity() {
     private lateinit var script: EditText
     private lateinit var engineUrl: EditText
     private lateinit var projectTitle: EditText
+    private lateinit var openResultButton: Button
+    private var lastResultUrl: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,13 +75,18 @@ class MainActivity : Activity() {
         root.addView(button("تولید تصویر طبیعی", ::generateImage))
         root.addView(button("تولید ویدیوی طبیعی", ::generateVideo))
         root.addView(button("ساخت طرح مستند", ::buildDocumentaryPlan))
+        openResultButton = button("باز کردن آخرین خروجی", ::openLastResult).apply {
+            isEnabled = false
+            alpha = 0.45f
+        }
+        root.addView(openResultButton)
 
         status = label("آماده", 13, Color.rgb(215,181,109), true).apply {
             setPadding(dp(14), dp(18), dp(14), dp(8))
         }
         root.addView(status)
 
-        root.addView(label("هستهٔ این نسخه به سرویس خاصی قفل نیست. موتور تولید می‌تواند روی کمپیوتر شخصی اجرا شود و بعداً تعویض گردد.", 12, Color.rgb(130,142,153), false).apply {
+        root.addView(label("موفقیت فقط وقتی نمایش داده می‌شود که خود موتور تولید، خروجی رسانه را تأیید کرده باشد.", 12, Color.rgb(130,142,153), false).apply {
             setPadding(0, dp(14), 0, 0)
         })
 
@@ -137,14 +146,33 @@ class MainActivity : Activity() {
         if (base.isBlank()) return show("آدرس موتور محلی را وارد کن")
         show("در حال آزمایش اتصال…")
         io.execute {
-            val ok = try {
+            val message = try {
                 val conn = URL("$base/system_stats").openConnection() as HttpURLConnection
                 conn.connectTimeout = 5000
-                conn.readTimeout = 5000
+                conn.readTimeout = 10000
                 conn.requestMethod = "GET"
-                conn.responseCode in 200..299
-            } catch (_: Exception) { false }
-            runOnUiThread { show(if (ok) "اتصال برقرار شد ✓" else "اتصال برقرار نشد") }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val body = BufferedReader(InputStreamReader(stream)).use { it.readText() }
+                if (code !in 200..299) {
+                    "موتور پاسخ خطا داد: HTTP $code"
+                } else {
+                    val obj = JSONObject(body)
+                    val comfy = obj.optJSONObject("comfyui")
+                    val ffmpeg = obj.optJSONObject("ffmpeg")
+                    val comfyReady = comfy?.optBoolean("reachable", false) == true && comfy.optInt("checkpoints", 0) > 0
+                    val ffmpegReady = ffmpeg?.optBoolean("available", false) == true
+                    when {
+                        comfyReady && ffmpegReady -> "موتور آماده است ✓ | تصویر ✓ | FFmpeg ✓"
+                        !comfyReady && ffmpegReady -> "سرور وصل است؛ مدل تصویر/ComfyUI هنوز آماده نیست"
+                        comfyReady && !ffmpegReady -> "تصویر آماده است؛ FFmpeg پیدا نشد"
+                        else -> "سرور وصل است، اما موتورهای تولید هنوز آماده نیستند"
+                    }
+                }
+            } catch (e: Exception) {
+                "اتصال برقرار نشد: ${e.message ?: "خطای شبکه"}"
+            }
+            runOnUiThread { show(message) }
         }
     }
 
@@ -159,23 +187,52 @@ class MainActivity : Activity() {
 
         val realism = "photorealistic documentary footage, natural human faces, realistic lighting, authentic environment, cinematic documentary, no cartoon, no anime, no illustration"
         val payload = JSONObject().put("type", kind).put("prompt", "$text\n$realism")
-        show(if (kind == "image") "درخواست تصویر طبیعی ارسال شد…" else "درخواست ویدیوی طبیعی ارسال شد…")
+        show(if (kind == "image") "در حال تولید تصویر طبیعی…" else "در حال تولید ویدیوی طبیعی…")
+        openResultButton.isEnabled = false
+        openResultButton.alpha = 0.45f
 
         io.execute {
-            val result = try {
+            val outcome = try {
                 val conn = URL("$base/docstudio/generate").openConnection() as HttpURLConnection
                 conn.connectTimeout = 8000
-                conn.readTimeout = 30000
+                conn.readTimeout = 1_800_000
                 conn.requestMethod = "POST"
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
-                val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-                BufferedReader(InputStreamReader(stream)).use { it.readText() }
-            } catch (e: Exception) { "ERROR: ${e.message}" }
-            runOnUiThread {
-                show(if (result.startsWith("ERROR:")) "موتور پاسخ نداد" else "درخواست پذیرفته شد ✓")
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val raw = BufferedReader(InputStreamReader(stream)).use { it.readText() }
+                val obj = try { JSONObject(raw) } catch (_: Exception) { JSONObject() }
+                if (code in 200..299 && obj.optBoolean("ok", false)) {
+                    val relative = obj.optString("url", "")
+                    val resultUrl = if (relative.startsWith("http")) relative else "$base$relative"
+                    val backend = obj.optString("backend", "local")
+                    Triple(true, "خروجی واقعاً ساخته شد ✓ | $backend", resultUrl)
+                } else {
+                    val error = obj.optString("error", raw.ifBlank { "HTTP $code" })
+                    Triple(false, "تولید ناموفق: $error", "")
+                }
+            } catch (e: Exception) {
+                Triple(false, "موتور پاسخ نداد: ${e.message ?: "خطای شبکه"}", "")
             }
+            runOnUiThread {
+                show(outcome.second)
+                if (outcome.first && outcome.third.isNotBlank()) {
+                    lastResultUrl = outcome.third
+                    openResultButton.isEnabled = true
+                    openResultButton.alpha = 1f
+                }
+            }
+        }
+    }
+
+    private fun openLastResult() {
+        val url = lastResultUrl ?: return show("هنوز خروجی ساخته نشده")
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            show("باز کردن خروجی ممکن نشد: ${e.message ?: "خطا"}")
         }
     }
 
