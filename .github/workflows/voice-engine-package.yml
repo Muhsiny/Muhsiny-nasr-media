@@ -1,0 +1,42 @@
+name: Package Persian Voice Engine
+
+on:
+  push:
+    branches:
+      - feature/documentary-studio-root-v3
+    paths:
+      - 'documentary-engine/voice_server.py'
+      - 'documentary-engine/start_persian_voice_windows.bat'
+      - '.github/workflows/voice-engine-package.yml'
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build user package
+        run: |
+          mkdir -p DocStudio-Persian-Voice-Engine
+          cp documentary-engine/voice_server.py DocStudio-Persian-Voice-Engine/
+          cp documentary-engine/start_persian_voice_windows.bat DocStudio-Persian-Voice-Engine/
+          cat > DocStudio-Persian-Voice-Engine/README-FA.txt <<'TXT'
+          موتور کلون صدای فارسی استدیوی مستند
+          ===================================
+
+          1) Python 3.11 یا جدیدتر و FFmpeg باید روی ویندوز نصب باشد.
+          2) فایل start_persian_voice_windows.bat را اجرا کنید.
+          3) در نخستین اجرا مدل فارسی دانلود و در کش محلی ذخیره می‌شود.
+          4) پنجره را هنگام استفاده از کلون صدا باز نگه دارید.
+          5) گوشی و کامپیوتر باید در یک شبکه باشند.
+          6) در اپ، آدرس موتور را http://IP-COMPUTER:8190 وارد کنید.
+          7) یک نمونه صدای تمیز 3 تا 5 ثانیه‌ای که اجازه استفاده از آن را دارید انتخاب کنید؛ سپس «ساخت پروفایل کلون» را بزنید.
+
+          موتور: Pocket-TTS Farsi
+          پردازش کلون بعد از کش اولیه مدل روی کامپیوتر محلی انجام می‌شود.
+          TXT
+          zip -r DocStudio-Persian-Voice-Engine-Windows.zip DocStudio-Persian-Voice-Engine
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DocStudio-Persian-Voice-Engine-Windows
+          path: DocStudio-Persian-Voice-Engine-Windows.zip
