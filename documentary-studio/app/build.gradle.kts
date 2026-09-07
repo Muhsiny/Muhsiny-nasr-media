@@ -11,8 +11,8 @@ android {
         applicationId = "af.muhsiny.docstudio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.0.1"
+        versionCode = 20
+        versionName = "2.0.0"
     }
 
     compileOptions {
@@ -29,4 +29,10 @@ android {
 
 kotlin {
     jvmToolchain(17)
+}
+
+dependencies {
+    implementation("androidx.media3:media3-transformer:1.11.0")
+    implementation("androidx.media3:media3-effect:1.11.0")
+    implementation("androidx.media3:media3-common:1.11.0")
 }
