@@ -42,6 +42,7 @@ class ExportEngine(private val context: Context) {
     ) {
         if (project.mediaUris.isEmpty()) return onError("هیچ عکس یا ویدیویی در پروژه نیست")
         if (narrationUris.isEmpty()) return onError("نریشن موجود نیست")
+        if (narrationDurationMs <= 0) return onError("مدت نریشن معتبر نیست")
         if (transformer != null) return onError("یک رندر دیگر در حال اجرا است")
 
         try {
@@ -106,13 +107,29 @@ class ExportEngine(private val context: Context) {
         val imageDuration = (durationMs / count).coerceIn(2500L, 12000L)
         return project.mediaUris.map { raw ->
             val uri = Uri.parse(raw)
-            val mime = context.contentResolver.getType(uri).orEmpty()
+            val mime = mediaMime(uri, raw)
             if (mime.startsWith("image/")) {
                 val item = MediaItem.Builder().setUri(uri).setImageDurationMs(imageDuration).build()
                 EditedMediaItem.Builder(item).setFrameRate(30).build()
             } else {
                 EditedMediaItem.Builder(MediaItem.fromUri(uri)).setRemoveAudio(true).build()
             }
+        }
+    }
+
+    internal fun mediaMime(uri: Uri, raw: String = uri.toString()): String {
+        val resolverMime = runCatching { context.contentResolver.getType(uri) }.getOrNull().orEmpty()
+        if (resolverMime.isNotBlank()) return resolverMime
+        val lower = raw.substringBefore('?').lowercase()
+        return when {
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".mp4") -> "video/mp4"
+            lower.endsWith(".webm") -> "video/webm"
+            lower.endsWith(".mkv") -> "video/x-matroska"
+            else -> "application/octet-stream"
         }
     }
 
