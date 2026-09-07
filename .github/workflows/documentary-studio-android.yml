@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/documentary-studio-v1
+      - feature/documentary-studio-standalone-v2
     paths:
       - 'documentary-studio/**'
       - '.github/workflows/documentary-studio-android.yml'
@@ -29,5 +30,5 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: documentary-studio-apk
+          name: documentary-studio-standalone-v2-apk
           path: documentary-studio/app/build/outputs/apk/debug/app-debug.apk
