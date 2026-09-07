@@ -1,0 +1,32 @@
+name: Test Farid Persian Neural Voice
+
+on:
+  push:
+    branches:
+      - feature/documentary-studio-v1
+    paths:
+      - 'tools/farid_neural_smoke.py'
+      - '.github/workflows/farid-neural-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  farid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install edge-tts
+        run: python -m pip install --upgrade edge-tts
+      - name: Generate Farid Persian sample
+        run: python tools/farid_neural_smoke.py
+      - name: Validate audio
+        run: |
+          test -s farid-neural-fa-IR.mp3
+          ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 farid-neural-fa-IR.mp3
+      - name: Upload Farid sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: farid-neural-fa-IR-sample
+          path: farid-neural-fa-IR.mp3
