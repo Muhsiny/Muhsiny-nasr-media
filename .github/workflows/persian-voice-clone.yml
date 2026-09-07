@@ -1,0 +1,95 @@
+name: Persian Voice Clone E2E
+
+on:
+  push:
+    branches:
+      - feature/documentary-studio-root-v3
+    paths:
+      - 'documentary-engine/voice_server.py'
+      - '.github/workflows/persian-voice-clone.yml'
+  workflow_dispatch:
+
+jobs:
+  clone-persian:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install FFmpeg and CPU voice engine
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install pocket-tts scipy --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Download Persian reference speech
+        run: |
+          curl -L --fail --retry 3 \
+            'https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/6ad44539-9915-4c61-b88f-9328995bb419.mp3' \
+            -o reference-fa.mp3
+          test $(stat -c%s reference-fa.mp3) -gt 20000
+      - name: Start local clone engine
+        env:
+          DOCSTUDIO_VOICE_HOME: ${{ github.workspace }}/.voice-test
+        run: |
+          python documentary-engine/voice_server.py > voice-server.log 2>&1 &
+          echo $! > voice-server.pid
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8190/health && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8190/health
+      - name: Register reference and synthesize Persian clone
+        run: |
+          python - <<'PY'
+          import base64, json, urllib.request
+          ref = base64.b64encode(open('reference-fa.mp3','rb').read()).decode()
+          def post(path, payload, timeout=1200):
+              req=urllib.request.Request('http://127.0.0.1:8190'+path,
+                  data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                  headers={'Content-Type':'application/json; charset=utf-8'}, method='POST')
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return json.loads(r.read().decode('utf-8'))
+          reg=post('/voice/register', {'name':'CI Persian reference','extension':'mp3','audio_base64':ref}, 60)
+          assert reg['ok'], reg
+          profile=reg['profile']['id']
+          out=post('/voice/synthesize', {
+              'profile_id':profile,
+              'text':'سلام. این یک آزمایش واقعی کلون صدای فارسی برای استدیوی مستند است.',
+              'title':'persian_clone_ci'
+          }, 1200)
+          assert out['ok'], out
+          print(json.dumps(out, ensure_ascii=False))
+          open('clone-result.json','w',encoding='utf-8').write(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+      - name: Validate generated WAV
+        run: |
+          python - <<'PY'
+          import json, pathlib, wave, array, math
+          data=json.load(open('clone-result.json',encoding='utf-8'))
+          p=pathlib.Path('.voice-test/output')/data['file']
+          assert p.exists(), p
+          assert p.stat().st_size > 60000, p.stat().st_size
+          with wave.open(str(p),'rb') as w:
+              assert w.getnchannels()==1
+              assert w.getframerate()==24000
+              seconds=w.getnframes()/w.getframerate()
+              raw=w.readframes(w.getnframes())
+          samples=array.array('h',raw)
+          rms=math.sqrt(sum(x*x for x in samples)/max(1,len(samples)))
+          assert seconds > 1.0, seconds
+          assert rms > 100, rms
+          print('validated', p, 'seconds=',round(seconds,2),'rms=',round(rms,1),'bytes=',p.stat().st_size)
+          pathlib.Path('persian-clone-tested.wav').write_bytes(p.read_bytes())
+          PY
+          ffmpeg -v error -i persian-clone-tested.wav -f null -
+      - name: Upload actual cloned Persian sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: persian-voice-clone-tested
+          path: |
+            persian-clone-tested.wav
+            clone-result.json
+            voice-server.log
