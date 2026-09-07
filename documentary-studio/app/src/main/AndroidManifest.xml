@@ -4,7 +4,8 @@
         android:allowBackup="true"
         android:label="استدیوی مستند"
         android:theme="@style/AppTheme"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
