@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "af.muhsiny.docstudio"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "af.muhsiny.docstudio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "2.0.0"
+        versionCode = 21
+        versionName = "2.0.1"
     }
 
     compileOptions {
