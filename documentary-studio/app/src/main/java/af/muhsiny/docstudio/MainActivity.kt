@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Color
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -22,6 +23,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var repo: ProjectRepository
     private lateinit var current: DocumentaryProject
     private lateinit var exportEngine: ExportEngine
+    private lateinit var cloneClient: PersianCloneClient
 
     private lateinit var panelHost: FrameLayout
     private lateinit var status: TextView
@@ -32,6 +34,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var mediaPreview: TextView? = null
     private var musicPreview: TextView? = null
     private var narrationPreview: TextView? = null
+    private var clonePreview: TextView? = null
+    private var cloneUrlEdit: EditText? = null
     private var voiceSpinner: Spinner? = null
     private var rateSeek: SeekBar? = null
     private var pitchSeek: SeekBar? = null
@@ -40,12 +44,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private var clonePlayer: MediaPlayer? = null
     private val persianVoices = mutableListOf<android.speech.tts.Voice>()
     private var suppressProjectSelection = false
 
     private val pickMediaCode = 5101
     private val pickMusicCode = 5102
     private val pickNarrationCode = 5103
+    private val pickCloneVoiceCode = 5104
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +62,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         repo = ProjectRepository(this)
         current = repo.currentOrCreate()
         exportEngine = ExportEngine(this)
+        cloneClient = PersianCloneClient(this)
         setContentView(buildUi())
         tts = TextToSpeech(this, this)
         showPanel(0)
@@ -69,6 +76,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         exportEngine.cancel()
+        clonePlayer?.release()
+        clonePlayer = null
         tts?.stop()
         tts?.shutdown()
         super.onDestroy()
@@ -81,7 +90,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(dp(12), dp(14), dp(12), dp(10))
         }
         root.addView(label("استدیوی مستند", 26, Color.WHITE, true).apply { gravity = Gravity.CENTER })
-        root.addView(label("نسخهٔ مستقل ۳ · پروژه، نریشن، رسانه و MP4 روی خود گوشی", 12, Color.rgb(165, 176, 187), false).apply {
+        root.addView(label("نسخهٔ ۴ · کلون صدای فارسی + پروژه + رسانه + رندر MP4", 12, Color.rgb(165, 176, 187), false).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(3), 0, dp(10))
         })
@@ -106,6 +115,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         repo.save(current)
         projectTitle = null
         script = null
+        cloneUrlEdit = null
         panelHost.removeAllViews()
         panelHost.addView(when (index) {
             0 -> projectPanel()
@@ -165,7 +175,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun scenesPanel(): View = scrollPanel {
         addView(section("صحنه‌بندی"))
         val scenes = ScenePlanner.scenes(current.script)
-        addView(info("${scenes.size} صحنه از متن ساخته شده است. نریشن طولانی نیز خودکار به قطعات زیر ۳۰۰۰ کاراکتر شکسته می‌شود."))
+        addView(info("${scenes.size} صحنه از متن ساخته شده است. نریشن بلند در موتور کلون نیز به قطعه‌های کوتاه فارسی شکسته و دوباره یکپارچه می‌شود."))
         scenePreview = info(if (scenes.isEmpty()) "متنی برای صحنه‌بندی وجود ندارد." else scenes.joinToString("\n\n") { "${it.index}. ${it.text}" }).apply { minHeight = dp(280) }
         addView(scenePreview)
         addView(button("بازسازی صحنه‌ها") { showPanel(1) })
@@ -191,7 +201,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun voicePanel(): View = scrollPanel {
-        addView(section("نریشن"))
+        addView(section("نریشن آماده"))
         narrationPreview = info("")
         addView(narrationPreview)
         updateNarrationPreview()
@@ -199,8 +209,25 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             current.narrationUri = null; repo.save(current); updateNarrationPreview(); show("نریشن آماده حذف شد")
         }))
 
-        addView(section("نریشن فارسی Android"))
-        addView(info("اگر فایل نریشن آماده انتخاب نشده باشد، متن با TTS خود گوشی ساخته می‌شود. متن بلند به چند قطعه تقسیم می‌شود تا از سقف TextToSpeech عبور نکند."))
+        addView(section("کلون واقعی صدای فارسی"))
+        addView(info("موتور محلی Pocket‑TTS فارسی از یک نمونهٔ تمیز حدود ۳ تا ۵ ثانیه‌ای پروفایل صدا می‌سازد. پردازش روی کامپیوتر خودت انجام می‌شود و بعد از دانلود اولیهٔ مدل، برای تولید صدا به سرویس ابری وابسته نیست."))
+        cloneUrlEdit = edit("آدرس موتور محلی، مثل http://192.168.1.10:8190", false).apply { setText(current.cloneEngineUrl) }
+        addView(cloneUrlEdit)
+        addView(row(button("آزمایش اتصال") { testCloneEngine() }, button("انتخاب نمونهٔ صدا") { pickCloneVoice() }))
+        clonePreview = info("")
+        addView(clonePreview)
+        updateClonePreview()
+        val enableClone = CheckBox(this@MainActivity).apply {
+            text = "در خروجی از صدای کلون‌شده استفاده شود"
+            setTextColor(Color.WHITE)
+            isChecked = current.useVoiceClone
+            setOnCheckedChangeListener { _, checked -> current.useVoiceClone = checked; repo.save(current) }
+        }
+        addView(enableClone)
+        addView(row(button("ساخت پروفایل کلون") { registerCloneVoice() }, button("تست صدای کلون") { previewCloneVoice() }))
+
+        addView(section("TTS فارسی Android · پشتیبان"))
+        addView(info("اگر پروفایل کلون فعال نباشد و فایل نریشن آماده هم نداشته باشی، از موتور گفتار فارسی خود گوشی استفاده می‌شود."))
         voiceSpinner = Spinner(this@MainActivity)
         addView(voiceSpinner, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)).apply { bottomMargin = dp(8) })
         refreshVoiceSpinner()
@@ -210,15 +237,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         addView(label("زیر و بمی", 13, Color.WHITE, true))
         pitchSeek = SeekBar(this@MainActivity).apply { max = 80; progress = 40 }
         addView(pitchSeek)
-        addView(row(button("تست صدا") { previewVoice() }, button("تازه‌سازی صداها") { loadPersianVoices() }))
+        addView(row(button("تست صدای Android") { previewVoice() }, button("تازه‌سازی صداها") { loadPersianVoices() }))
     }
 
     private fun exportPanel(): View = scrollPanel {
         addView(section("خروجی MP4"))
-        addView(info("مسیر واقعی: نریشن آماده یا TTS تکه‌ای → تصویر/ویدیو → موزیک اختیاری → Media3 Transformer → H.264/AAC → Movies/DocStudio. زیرنویس SRT نیز بر اساس طول واقعی نریشن ساخته می‌شود."))
+        addView(info("مسیر واقعی: نریشن آماده، یا کلون فارسی محلی، یا TTS گوشی → تصویر/ویدیو → موزیک اختیاری → Media3 Transformer → H.264/AAC → Movies/DocStudio. زیرنویس SRT از طول واقعی نریشن ساخته می‌شود."))
         exportProgress = ProgressBar(this@MainActivity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; progress = 0 }
         addView(exportProgress)
-        addView(button("ساخت مستند روی همین گوشی") { startExport() }.apply { textSize = 17f; minHeight = dp(66) })
+        addView(button("ساخت مستند") { startExport() }.apply { textSize = 17f; minHeight = dp(66) })
         openOutputButton = button("باز کردن آخرین MP4") { openLastOutput() }.apply {
             isEnabled = !current.lastOutputUri.isNullOrBlank()
             alpha = if (isEnabled) 1f else .45f
@@ -270,6 +297,58 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         show("پخش آزمایشی…")
     }
 
+    private fun testCloneEngine() {
+        syncFieldsToProject(); repo.save(current)
+        show("در حال بررسی موتور کلون…")
+        cloneClient.health(current.cloneEngineUrl,
+            onDone = { message -> runOnUiThread { show("موتور کلون وصل است ✓ · $message") } },
+            onError = { message -> runOnUiThread { show("اتصال کلون: $message") } }
+        )
+    }
+
+    private fun registerCloneVoice() {
+        syncFieldsToProject(); repo.save(current)
+        val raw = current.cloneReferenceUri ?: return show("اول یک نمونهٔ صدای ۳ تا ۵ ثانیه‌ای انتخاب کن")
+        show("در حال ساخت پروفایل واقعی صدا…")
+        cloneClient.registerVoice(
+            current.cloneEngineUrl,
+            Uri.parse(raw),
+            current.title.ifBlank { "صدای فارسی" },
+            onDone = { profile -> runOnUiThread {
+                current.cloneProfileId = profile.id
+                current.cloneProfileName = profile.name
+                current.useVoiceClone = true
+                repo.save(current)
+                updateClonePreview()
+                show("پروفایل کلون ساخته شد ✓")
+            }},
+            onError = { message -> runOnUiThread { show("کلون ناموفق: $message") } }
+        )
+    }
+
+    private fun previewCloneVoice() {
+        syncFieldsToProject(); repo.save(current)
+        val id = current.cloneProfileId ?: return show("اول پروفایل کلون را بساز")
+        val sample = current.script.ifBlank { "این یک نمونهٔ واقعی از کلون صدای فارسی برای روایت مستند است." }.take(260)
+        show("در حال تولید تست کلون فارسی…")
+        cloneClient.synthesize(
+            current.cloneEngineUrl, id, sample, "clone_preview",
+            onDone = { result -> runOnUiThread {
+                playAudio(result.uri)
+                show("صدای کلون ساخته شد ✓ · ${result.chunks} قطعه")
+            }},
+            onError = { message -> runOnUiThread { show("تولید کلون ناموفق: $message") } }
+        )
+    }
+
+    private fun playAudio(uri: Uri) {
+        clonePlayer?.release()
+        clonePlayer = MediaPlayer.create(this, uri)?.apply {
+            setOnCompletionListener { p -> p.release(); if (clonePlayer === p) clonePlayer = null }
+            start()
+        }
+    }
+
     private fun startExport() {
         syncFieldsToProject(); repo.save(current)
         if (current.script.isBlank()) return show("متن مستند خالی است")
@@ -284,9 +363,36 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
 
-        if (!ttsReady || tts == null) return show("TTS فارسی آماده نیست؛ یک MP3/WAV نریشن انتخاب کن")
+        val cloneId = current.cloneProfileId
+        if (current.useVoiceClone && !cloneId.isNullOrBlank()) {
+            show("در حال ساخت نریشن با کلون فارسی…")
+            exportProgress?.progress = 5
+            cloneClient.synthesize(
+                current.cloneEngineUrl,
+                cloneId,
+                current.script,
+                safeName(current.title),
+                onDone = { result -> runOnUiThread {
+                    val duration = NarrationEngine.audioDurationMs(this, result.uri)
+                    if (duration <= 0) {
+                        exportProgress?.progress = 0
+                        show("فایل کلون ساخته شد اما مدت آن خوانده نشد")
+                    } else {
+                        exportProgress?.progress = 25
+                        beginExport(listOf(result.uri), duration)
+                    }
+                }},
+                onError = { message -> runOnUiThread {
+                    exportProgress?.progress = 0
+                    show("کلون فارسی ناموفق: $message")
+                }}
+            )
+            return
+        }
+
+        if (!ttsReady || tts == null) return show("کلون فعال نیست و TTS فارسی هم آماده نیست؛ یک MP3/WAV انتخاب کن")
         applyVoiceSettings()
-        show("در حال ساخت نریشن تکه‌ای…")
+        show("در حال ساخت نریشن تکه‌ای با TTS گوشی…")
         NarrationEngine(this, tts!!).synthesize(
             current.script,
             onProgress = { done, total -> runOnUiThread {
@@ -347,6 +453,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun pickMusic() = startActivityForResult(audioIntent(), pickMusicCode)
     private fun pickNarration() = startActivityForResult(audioIntent(), pickNarrationCode)
+    private fun pickCloneVoice() = startActivityForResult(audioIntent(), pickCloneVoiceCode)
 
     private fun audioIntent() = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
         addCategory(Intent.CATEGORY_OPENABLE)
@@ -369,6 +476,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             pickNarrationCode -> data.data?.let {
                 persistPermission(it); current.narrationUri = it.toString(); repo.save(current); updateNarrationPreview(); show("نریشن آماده انتخاب شد")
+            }
+            pickCloneVoiceCode -> data.data?.let {
+                persistPermission(it)
+                current.cloneReferenceUri = it.toString()
+                current.cloneProfileId = null
+                current.cloneProfileName = null
+                current.useVoiceClone = true
+                repo.save(current)
+                updateClonePreview()
+                show("نمونهٔ صدا انتخاب شد؛ حالا پروفایل کلون را بساز")
             }
         }
     }
@@ -396,6 +513,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun syncFieldsToProject() {
         projectTitle?.let { current.title = it.text.toString().ifBlank { "مستند جدید" } }
         script?.let { current.script = it.text.toString() }
+        cloneUrlEdit?.let { current.cloneEngineUrl = it.text.toString().trim().ifBlank { "http://10.0.2.2:8190" } }
     }
 
     private fun updateMediaPreview() {
@@ -411,7 +529,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val uri = Uri.parse(it)
             val duration = NarrationEngine.audioDurationMs(this, uri)
             "نریشن آماده: ${displayName(uri)} · ${duration / 1000} ثانیه"
-        } ?: "نریشن آماده انتخاب نشده؛ هنگام خروجی از TTS فارسی گوشی استفاده می‌شود."
+        } ?: "نریشن آماده انتخاب نشده است. در خروجی، کلون فارسیِ فعال اولویت دارد و بعد TTS گوشی."
+    }
+
+    private fun updateClonePreview() {
+        val reference = current.cloneReferenceUri?.let { displayName(Uri.parse(it)) } ?: "انتخاب نشده"
+        val profile = current.cloneProfileId?.let { current.cloneProfileName ?: it.take(10) } ?: "هنوز ساخته نشده"
+        clonePreview?.text = "نمونه: $reference\nپروفایل: $profile\nموتور: ${current.cloneEngineUrl}"
     }
 
     private fun openLastOutput() {
