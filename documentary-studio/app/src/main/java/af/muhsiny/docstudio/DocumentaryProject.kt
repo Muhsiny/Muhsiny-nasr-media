@@ -13,6 +13,11 @@ data class DocumentaryProject(
     var mediaUris: MutableList<String> = mutableListOf(),
     var musicUri: String? = null,
     var narrationUri: String? = null,
+    var cloneEngineUrl: String = "http://10.0.2.2:8190",
+    var cloneReferenceUri: String? = null,
+    var cloneProfileId: String? = null,
+    var cloneProfileName: String? = null,
+    var useVoiceClone: Boolean = true,
     var lastOutputUri: String? = null,
     var createdAt: Long = System.currentTimeMillis(),
     var updatedAt: Long = System.currentTimeMillis()
@@ -24,6 +29,11 @@ data class DocumentaryProject(
         put("mediaUris", JSONArray(mediaUris))
         put("musicUri", musicUri ?: JSONObject.NULL)
         put("narrationUri", narrationUri ?: JSONObject.NULL)
+        put("cloneEngineUrl", cloneEngineUrl)
+        put("cloneReferenceUri", cloneReferenceUri ?: JSONObject.NULL)
+        put("cloneProfileId", cloneProfileId ?: JSONObject.NULL)
+        put("cloneProfileName", cloneProfileName ?: JSONObject.NULL)
+        put("useVoiceClone", useVoiceClone)
         put("lastOutputUri", lastOutputUri ?: JSONObject.NULL)
         put("createdAt", createdAt)
         put("updatedAt", updatedAt)
@@ -41,6 +51,11 @@ data class DocumentaryProject(
                 mediaUris = media,
                 musicUri = o.optNullableString("musicUri"),
                 narrationUri = o.optNullableString("narrationUri"),
+                cloneEngineUrl = o.optString("cloneEngineUrl", "http://10.0.2.2:8190"),
+                cloneReferenceUri = o.optNullableString("cloneReferenceUri"),
+                cloneProfileId = o.optNullableString("cloneProfileId"),
+                cloneProfileName = o.optNullableString("cloneProfileName"),
+                useVoiceClone = o.optBoolean("useVoiceClone", true),
                 lastOutputUri = o.optNullableString("lastOutputUri"),
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                 updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
