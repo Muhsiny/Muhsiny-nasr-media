@@ -26,10 +26,14 @@ class MainActivitySmokeTest {
 
                 findButton(activity.window.decorView, "صدا")!!.performClick()
                 assertNotNull(findButton(activity.window.decorView, "انتخاب MP3/WAV آماده"))
-                assertNotNull(findButton(activity.window.decorView, "تست صدا"))
+                assertNotNull(findButton(activity.window.decorView, "آزمایش اتصال"))
+                assertNotNull(findButton(activity.window.decorView, "انتخاب نمونهٔ صدا"))
+                assertNotNull(findButton(activity.window.decorView, "ساخت پروفایل کلون"))
+                assertNotNull(findButton(activity.window.decorView, "تست صدای کلون"))
+                assertNotNull(findButton(activity.window.decorView, "تست صدای Android"))
 
                 findButton(activity.window.decorView, "خروجی")!!.performClick()
-                assertNotNull(findButton(activity.window.decorView, "ساخت مستند روی همین گوشی"))
+                assertNotNull(findButton(activity.window.decorView, "ساخت مستند"))
             }
         }
     }
