@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-import json
-import mimetypes
-import os
-import random
-import shutil
-import subprocess
-import time
-import uuid
+import json, mimetypes, os, random, shutil, subprocess, time, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlencode, urlparse
@@ -22,25 +15,26 @@ WAN_WORKFLOW_API = os.getenv("WAN_WORKFLOW_API", "").strip()
 OUTPUT_DIR = Path(os.getenv("DOCSTUDIO_OUTPUT", str(Path.home() / "DocStudio" / "output"))).expanduser()
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+WAN_MODEL = "wan2.2_ti2v_5B_fp16.safetensors"
+WAN_CLIP = "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+WAN_VAE = "wan2.2_vae.safetensors"
 REALISM_SUFFIX = (
     "photorealistic documentary photography, authentic real-world location, natural human anatomy and skin texture, "
     "realistic lighting, physically plausible materials, candid documentary framing, cinematic but factual, "
-    "high detail, natural color science, no illustration, no cartoon, no anime, no CGI look, no plastic skin"
+    "natural motion, high detail, natural color science, no illustration, no cartoon, no anime, no CGI look, no plastic skin"
 )
 NEGATIVE_PROMPT = (
-    "cartoon, anime, illustration, painting, 3d render, cgi, doll, plastic skin, wax face, deformed hands, "
-    "extra fingers, duplicated people, distorted face, oversaturated, fantasy costume, text, watermark, logo"
+    "cartoon, anime, illustration, painting, 3d render, cgi, doll, plastic skin, wax face, deformed hands, extra fingers, "
+    "duplicated people, distorted face, oversaturated, fantasy costume, static pose, flicker, text, watermark, logo"
 )
 
 
 def http_json(url, method="GET", payload=None, timeout=20):
-    data = None
-    headers = {"Accept": "application/json"}
+    data, headers = None, {"Accept": "application/json"}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json; charset=utf-8"
-    req = Request(url, data=data, headers=headers, method=method)
-    with urlopen(req, timeout=timeout) as r:
+    with urlopen(Request(url, data=data, headers=headers, method=method), timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
@@ -67,46 +61,47 @@ def has_persian(text):
 def translate_visual_prompt(text):
     if not OLLAMA_MODEL or not has_persian(text):
         return text
-    instruction = (
-        "Translate the following Persian/Dari documentary scene into one concise English visual-generation prompt. "
-        "Preserve names, place, era, clothing, architecture and factual details. Do not invent propaganda, symbols or fantasy. "
+    task = (
+        "Translate this Persian/Dari documentary scene into one concise English visual-generation prompt. "
+        "Preserve names, location, historical era, clothing and architecture. Do not invent symbols or fantasy. "
         "Return only the English visual prompt.\n\n" + text
     )
     try:
-        data = http_json(
-            f"{OLLAMA_URL}/api/generate",
-            "POST",
-            {"model": OLLAMA_MODEL, "prompt": instruction, "stream": False},
-            timeout=120,
-        )
-        out = str(data.get("response", "")).strip()
-        return out or text
+        out = http_json(f"{OLLAMA_URL}/api/generate", "POST", {"model": OLLAMA_MODEL, "prompt": task, "stream": False}, 120)
+        return str(out.get("response", "")).strip() or text
     except Exception:
         return text
 
 
 def visual_prompt(text):
-    base = translate_visual_prompt(text.strip())
-    return f"{base}. {REALISM_SUFFIX}"
+    return f"{translate_visual_prompt(text.strip())}. {REALISM_SUFFIX}"
 
 
-def _extract_choices(value):
-    if isinstance(value, list):
-        if value and isinstance(value[0], list):
+def extract_choices(value):
+    if isinstance(value, list) and value:
+        if isinstance(value[0], list):
             return [str(x) for x in value[0]]
-        if value and all(isinstance(x, str) for x in value):
+        if all(isinstance(x, str) for x in value):
             return value
     return []
 
 
-def available_checkpoints():
+def object_info(node_class=None):
     try:
-        info = comfy_json("/object_info/CheckpointLoaderSimple")
-        node = info.get("CheckpointLoaderSimple", info)
-        req = node.get("input", {}).get("required", {})
-        return _extract_choices(req.get("ckpt_name", []))
+        path = f"/object_info/{quote(node_class)}" if node_class else "/object_info"
+        return comfy_json(path, timeout=20)
     except Exception:
-        return []
+        return {}
+
+
+def model_choices(node_class, field):
+    info = object_info(node_class)
+    node = info.get(node_class, info)
+    return extract_choices(node.get("input", {}).get("required", {}).get(field, [])) if isinstance(node, dict) else []
+
+
+def available_checkpoints():
+    return model_choices("CheckpointLoaderSimple", "ckpt_name")
 
 
 def choose_checkpoint():
@@ -116,9 +111,8 @@ def choose_checkpoint():
             return IMAGE_CHECKPOINT
         raise RuntimeError(f"Configured IMAGE_CHECKPOINT not found: {IMAGE_CHECKPOINT}")
     if not names:
-        raise RuntimeError("No ComfyUI checkpoint found. Install an SD/SDXL photorealistic checkpoint or set IMAGE_CHECKPOINT.")
-    priorities = ("realvis", "juggernaut", "realistic", "photoreal", "cinematic", "sdxl")
-    for key in priorities:
+        raise RuntimeError("No local image checkpoint found in ComfyUI.")
+    for key in ("realvis", "juggernaut", "realistic", "photoreal", "cinematic", "sdxl"):
         for name in names:
             if key in name.lower():
                 return name
@@ -126,14 +120,10 @@ def choose_checkpoint():
 
 
 def build_image_workflow(prompt, width=1024, height=576, seed=None):
-    checkpoint = choose_checkpoint()
     seed = int(seed if seed is not None else random.randrange(1, 2**31 - 1))
     return {
-        "3": {"class_type": "KSampler", "inputs": {
-            "seed": seed, "steps": 30, "cfg": 5.5, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1.0,
-            "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0]
-        }},
-        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}},
+        "3": {"class_type": "KSampler", "inputs": {"seed": seed, "steps": 35, "cfg": 5.0, "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1.0, "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0]}},
+        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": choose_checkpoint()}},
         "5": {"class_type": "EmptyLatentImage", "inputs": {"width": int(width), "height": int(height), "batch_size": 1}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["4", 1]}},
         "7": {"class_type": "CLIPTextEncode", "inputs": {"text": NEGATIVE_PROMPT, "clip": ["4", 1]}},
@@ -142,8 +132,42 @@ def build_image_workflow(prompt, width=1024, height=576, seed=None):
     }
 
 
+def wan_native_state():
+    info = object_info()
+    required_nodes = {"UNETLoader", "CLIPLoader", "VAELoader", "ModelSamplingSD3", "CLIPTextEncode", "Wan22ImageToVideoLatent", "KSampler", "VAEDecode", "CreateVideo", "SaveVideo"}
+    missing_nodes = sorted(required_nodes - set(info)) if info else sorted(required_nodes)
+    unets = model_choices("UNETLoader", "unet_name")
+    clips = model_choices("CLIPLoader", "clip_name")
+    vaes = model_choices("VAELoader", "vae_name")
+    missing_models = []
+    if WAN_MODEL not in unets:
+        missing_models.append(WAN_MODEL)
+    if WAN_CLIP not in clips:
+        missing_models.append(WAN_CLIP)
+    if WAN_VAE not in vaes:
+        missing_models.append(WAN_VAE)
+    return {"ready": not missing_nodes and not missing_models, "missing_nodes": missing_nodes, "missing_models": missing_models}
+
+
+def build_wan_native_workflow(text, width=832, height=480, length=81, steps=20):
+    prompt = visual_prompt(text)
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": WAN_MODEL, "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": WAN_CLIP, "type": "wan", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": WAN_VAE}},
+        "4": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 8}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": prompt}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": NEGATIVE_PROMPT + ", unnatural motion, jitter, camera shake"}},
+        "7": {"class_type": "Wan22ImageToVideoLatent", "inputs": {"vae": ["3", 0], "width": int(width), "height": int(height), "length": int(length), "batch_size": 1}},
+        "8": {"class_type": "KSampler", "inputs": {"model": ["4", 0], "seed": random.randrange(1, 2**31 - 1), "steps": int(steps), "cfg": 5, "sampler_name": "uni_pc", "scheduler": "simple", "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0], "denoise": 1.0}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "CreateVideo", "inputs": {"images": ["9", 0], "fps": 24.0}},
+        "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": "video/DocStudio_Wan22", "format": "mp4", "codec": "h264"}},
+    }
+
+
 def submit_workflow(workflow):
-    result = comfy_json("/prompt", "POST", {"prompt": workflow, "client_id": str(uuid.uuid4())}, timeout=30)
+    result = comfy_json("/prompt", "POST", {"prompt": workflow, "client_id": str(uuid.uuid4())}, 30)
     if result.get("error"):
         raise RuntimeError(str(result.get("error")))
     prompt_id = result.get("prompt_id")
@@ -157,10 +181,18 @@ def wait_history(prompt_id, timeout=900):
     while time.time() < deadline:
         try:
             data = comfy_json(f"/history/{quote(prompt_id)}", timeout=15)
-            if prompt_id in data:
-                return data[prompt_id]
-            if data and isinstance(data, dict) and "outputs" in data:
-                return data
+            item = data.get(prompt_id) if isinstance(data, dict) else None
+            if not item and isinstance(data, dict) and "outputs" in data:
+                item = data
+            if item:
+                status = item.get("status", {}) if isinstance(item, dict) else {}
+                for msg in status.get("messages", []):
+                    if isinstance(msg, list) and msg and msg[0] == "execution_error":
+                        raise RuntimeError(json.dumps(msg, ensure_ascii=False))
+                if status.get("completed") or item.get("outputs"):
+                    return item
+        except RuntimeError:
+            raise
         except Exception:
             pass
         time.sleep(1.5)
@@ -171,11 +203,7 @@ def find_files(obj):
     out = []
     if isinstance(obj, dict):
         if "filename" in obj:
-            out.append({
-                "filename": str(obj.get("filename", "")),
-                "subfolder": str(obj.get("subfolder", "")),
-                "type": str(obj.get("type", "output")),
-            })
+            out.append({"filename": str(obj.get("filename", "")), "subfolder": str(obj.get("subfolder", "")), "type": str(obj.get("type", "output"))})
         for value in obj.values():
             out.extend(find_files(value))
     elif isinstance(obj, list):
@@ -186,26 +214,30 @@ def find_files(obj):
 
 def download_comfy_file(item, prefix="media"):
     query = urlencode({"filename": item["filename"], "subfolder": item.get("subfolder", ""), "type": item.get("type", "output")})
-    url = f"{COMFY_URL}/view?{query}"
     suffix = Path(item["filename"]).suffix or ".bin"
     dest = OUTPUT_DIR / f"{prefix}_{int(time.time())}_{uuid.uuid4().hex[:8]}{suffix}"
-    with urlopen(url, timeout=120) as r, dest.open("wb") as f:
+    with urlopen(f"{COMFY_URL}/view?{query}", timeout=120) as r, dest.open("wb") as f:
         shutil.copyfileobj(r, f)
     return dest
+
+
+def collect_media(history, video=False):
+    files = find_files(history.get("outputs", history))
+    if video:
+        files = [f for f in files if Path(f["filename"]).suffix.lower() in {".mp4", ".webm", ".mov", ".gif"}]
+    if not files:
+        raise RuntimeError("Generation finished but no media file was reported")
+    return files[0]
 
 
 def generate_image(text, width=1024, height=576):
     if not comfy_available():
         raise RuntimeError(f"ComfyUI is not reachable at {COMFY_URL}")
     prompt = visual_prompt(text)
-    workflow = build_image_workflow(prompt, width, height)
-    prompt_id = submit_workflow(workflow)
-    history = wait_history(prompt_id)
-    files = find_files(history.get("outputs", history))
-    if not files:
-        raise RuntimeError("ComfyUI finished but no image file was reported")
-    path = download_comfy_file(files[0], "image")
-    return {"backend": "comfyui-checkpoint", "path": str(path), "prompt": prompt, "prompt_id": prompt_id}
+    prompt_id = submit_workflow(build_image_workflow(prompt, width, height))
+    item = collect_media(wait_history(prompt_id))
+    path = download_comfy_file(item, "image")
+    return {"backend": "comfyui-photoreal", "path": str(path), "prompt": prompt, "prompt_id": prompt_id}
 
 
 def template_replace(obj, prompt, negative, seed):
@@ -222,20 +254,25 @@ def template_replace(obj, prompt, negative, seed):
     return obj
 
 
-def generate_wan_video(text):
+def generate_external_wan(text):
     path = Path(WAN_WORKFLOW_API).expanduser()
     if not path.exists():
         raise RuntimeError(f"WAN_WORKFLOW_API does not exist: {path}")
-    workflow = json.loads(path.read_text(encoding="utf-8"))
-    workflow = template_replace(workflow, visual_prompt(text), NEGATIVE_PROMPT, random.randrange(1, 2**31 - 1))
+    workflow = template_replace(json.loads(path.read_text(encoding="utf-8")), visual_prompt(text), NEGATIVE_PROMPT, random.randrange(1, 2**31 - 1))
     prompt_id = submit_workflow(workflow)
-    history = wait_history(prompt_id, timeout=1800)
-    files = find_files(history.get("outputs", history))
-    videos = [f for f in files if Path(f["filename"]).suffix.lower() in {".mp4", ".webm", ".mov", ".gif"}]
-    if not videos:
-        raise RuntimeError("Wan workflow finished but no video file was reported")
-    out = download_comfy_file(videos[0], "wan_video")
-    return {"backend": "wan-api-workflow", "path": str(out), "prompt_id": prompt_id}
+    item = collect_media(wait_history(prompt_id, 1800), video=True)
+    out = download_comfy_file(item, "wan_video")
+    return {"backend": "wan-custom-workflow", "path": str(out), "prompt_id": prompt_id}
+
+
+def generate_native_wan(text):
+    state = wan_native_state()
+    if not state["ready"]:
+        raise RuntimeError("Wan 2.2 5B is not ready: " + json.dumps(state, ensure_ascii=False))
+    prompt_id = submit_workflow(build_wan_native_workflow(text))
+    item = collect_media(wait_history(prompt_id, 1800), video=True)
+    out = download_comfy_file(item, "wan22_video")
+    return {"backend": "wan2.2-5b-native", "path": str(out), "prompt_id": prompt_id}
 
 
 def make_documentary_motion(image_path, seconds=8):
@@ -246,12 +283,7 @@ def make_documentary_motion(image_path, seconds=8):
         raise RuntimeError(f"Image not found: {src}")
     out = OUTPUT_DIR / f"docvideo_{int(time.time())}_{uuid.uuid4().hex[:8]}.mp4"
     frames = max(30, int(seconds * 30))
-    vf = (
-        "scale=1920:1080:force_original_aspect_ratio=increase,"
-        "crop=1920:1080,"
-        f"zoompan=z='min(zoom+0.00055,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps=30,"
-        "format=yuv420p"
-    )
+    vf = "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080," + f"zoompan=z='min(zoom+0.00055,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps=30,format=yuv420p"
     cmd = ["ffmpeg", "-y", "-loop", "1", "-i", str(src), "-vf", vf, "-frames:v", str(frames), "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-movflags", "+faststart", str(out)]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0:
@@ -260,35 +292,42 @@ def make_documentary_motion(image_path, seconds=8):
 
 
 def generate_video(text):
+    errors = []
     if WAN_WORKFLOW_API:
         try:
-            return generate_wan_video(text)
-        except Exception as wan_error:
-            image = generate_image(text)
-            out = make_documentary_motion(image["path"])
-            return {"backend": "documentary-motion-fallback", "path": str(out), "source_image": image["path"], "wan_error": str(wan_error)}
+            return generate_external_wan(text)
+        except Exception as e:
+            errors.append(f"custom Wan: {e}")
+    if wan_native_state()["ready"]:
+        try:
+            return generate_native_wan(text)
+        except Exception as e:
+            errors.append(f"native Wan: {e}")
     image = generate_image(text)
     out = make_documentary_motion(image["path"])
-    return {"backend": "documentary-motion", "path": str(out), "source_image": image["path"]}
+    result = {"backend": "documentary-motion-fallback", "path": str(out), "source_image": image["path"]}
+    if errors:
+        result["generative_video_errors"] = errors
+    return result
 
 
 def status_payload():
     comfy_ok = comfy_available()
-    checkpoints = available_checkpoints() if comfy_ok else []
+    wan = wan_native_state() if comfy_ok else {"ready": False, "missing_nodes": [], "missing_models": [WAN_MODEL, WAN_CLIP, WAN_VAE]}
     return {
         "ok": True,
         "service": "Documentary Studio Local Engine",
-        "version": "0.2.0",
-        "comfyui": {"url": COMFY_URL, "reachable": comfy_ok, "checkpoints": len(checkpoints)},
+        "version": "0.3.0",
+        "comfyui": {"url": COMFY_URL, "reachable": comfy_ok, "checkpoints": len(available_checkpoints()) if comfy_ok else 0},
         "ffmpeg": {"available": ffmpeg_available(), "path": shutil.which("ffmpeg")},
         "ollama": {"enabled": bool(OLLAMA_MODEL), "model": OLLAMA_MODEL or None},
-        "wan": {"enabled": bool(WAN_WORKFLOW_API), "workflow": WAN_WORKFLOW_API or None},
+        "wan": {"native_5b": wan, "custom_workflow": WAN_WORKFLOW_API or None},
         "output_dir": str(OUTPUT_DIR),
     }
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "DocStudioLocal/0.2"
+    server_version = "DocStudioLocal/0.3"
 
     def send_json(self, code, obj):
         data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -303,13 +342,11 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/system_stats":
             return self.send_json(200, status_payload())
         if parsed.path.startswith("/outputs/"):
-            name = Path(parsed.path[len("/outputs/"):]).name
-            path = OUTPUT_DIR / name
+            path = OUTPUT_DIR / Path(parsed.path[len("/outputs/"):]).name
             if not path.exists():
                 return self.send_json(404, {"ok": False, "error": "not found"})
-            ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             self.send_response(200)
-            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
             self.send_header("Content-Length", str(path.stat().st_size))
             self.end_headers()
             with path.open("rb") as f:
@@ -321,9 +358,8 @@ class Handler(BaseHTTPRequestHandler):
         if urlparse(self.path).path != "/docstudio/generate":
             return self.send_json(404, {"ok": False, "error": "unknown endpoint"})
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            body = json.loads(self.rfile.read(length).decode("utf-8"))
-            kind = str(body.get("type", "image")).strip().lower()
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode("utf-8"))
+            kind = str(body.get("type", "image")).lower().strip()
             prompt = str(body.get("prompt", "")).strip()
             if not prompt:
                 raise ValueError("prompt is required")
@@ -344,7 +380,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"Documentary Studio Local Engine 0.2 on http://{HOST}:{PORT}")
+    print(f"Documentary Studio Local Engine 0.3 on http://{HOST}:{PORT}")
     print(f"ComfyUI: {COMFY_URL}")
     print(f"Output: {OUTPUT_DIR}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
