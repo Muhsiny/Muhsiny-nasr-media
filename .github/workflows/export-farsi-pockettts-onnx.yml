@@ -1,0 +1,76 @@
+name: Export Persian PocketTTS ONNX
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/documentary-studio-v5-standalone
+    paths:
+      - '.github/workflows/export-farsi-pockettts-onnx.yml'
+
+jobs:
+  export-farsi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg git curl
+          python -m pip install --upgrade uv
+
+      - name: Clone Android PocketTTS runtime
+        run: |
+          git clone --depth=1 https://github.com/The-unknown-Shadowman/PocketTTS-Android-Engine.git /tmp/pocket-engine
+
+      - name: Prepare Python exporter
+        working-directory: /tmp/pocket-engine
+        run: |
+          uv venv .venv-model-export --python 3.12
+          source .venv-model-export/bin/activate
+          uv pip install --index-url https://download.pytorch.org/whl/cpu torch
+          uv pip install -e vendor/pocket-tts onnx onnxruntime
+
+      - name: Download Persian model config
+        run: |
+          mkdir -p /tmp/farsi-config
+          curl -fL --retry 5 --retry-delay 3 \
+            https://huggingface.co/mehdi-hf/pocket-tts-farsi/resolve/main/farsi.yaml \
+            -o /tmp/farsi-config/farsi.yaml
+          cat /tmp/farsi-config/farsi.yaml
+
+      - name: Export and validate Persian ONNX
+        working-directory: /tmp/pocket-engine
+        env:
+          HF_HOME: /tmp/hf-cache
+        run: |
+          source .venv-model-export/bin/activate
+          python vendor/PocketTTS.cpp/export_onnx.py \
+            --config /tmp/farsi-config/farsi.yaml \
+            --output-dir /tmp/pocket-farsi-onnx
+          ls -lh /tmp/pocket-farsi-onnx
+
+      - name: Verify required Android model files
+        run: |
+          set -e
+          test -s /tmp/pocket-farsi-onnx/tokenizer.model
+          test -s /tmp/pocket-farsi-onnx/mimi_encoder.onnx
+          test -s /tmp/pocket-farsi-onnx/text_conditioner.onnx
+          test -s /tmp/pocket-farsi-onnx/flow_lm_main_int8.onnx
+          test -s /tmp/pocket-farsi-onnx/flow_lm_flow_int8.onnx
+          test -s /tmp/pocket-farsi-onnx/mimi_decoder_int8.onnx
+          du -sh /tmp/pocket-farsi-onnx
+
+      - name: Upload validated Persian model
+        uses: actions/upload-artifact@v4
+        with:
+          name: pockettts-farsi-onnx-validated
+          path: /tmp/pocket-farsi-onnx
+          compression-level: 0
+          retention-days: 30
