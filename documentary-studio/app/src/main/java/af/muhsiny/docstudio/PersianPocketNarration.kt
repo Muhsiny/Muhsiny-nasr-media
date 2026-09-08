@@ -13,6 +13,7 @@ import kotlin.math.roundToInt
 
 class PersianPocketNarration(private val context: Context) {
     data class Result(val uris: List<Uri>, val totalDurationMs: Long)
+    data class SceneResult(val uris: List<Uri>, val durationsMs: List<Long>, val totalDurationMs: Long)
 
     private val handler = Handler(Looper.getMainLooper())
     private val root = File(context.filesDir, "pockettts_fa")
@@ -23,23 +24,14 @@ class PersianPocketNarration(private val context: Context) {
     @Volatile private var running: OnDevicePocketTts? = null
 
     fun modelInstalled(): Boolean = requiredModels().all { File(modelDir, it).length() > 1024L }
-
-    fun cancel() {
-        running?.stop()
-    }
-
     fun defaultVoiceReady(): Boolean = File(voicesDir, "example_voice.wav").length() > 4096L
+    fun cancel() { running?.stop() }
 
     fun prepare(onDone: () -> Unit, onError: (String) -> Unit) {
         Thread {
-            runCatching {
-                modelDir.mkdirs(); voicesDir.mkdirs(); generatedDir.mkdirs()
-                requiredModels().forEach { copyAssetIfNeeded("pockettts_fa/model/$it", File(modelDir, it)) }
-                copyAssetIfNeeded("pockettts_fa/voices/example_voice.wav", File(voicesDir, "example_voice.wav"))
-                check(modelInstalled()) { "فایل‌های مدل فارسی ناقص است" }
-                check(defaultVoiceReady()) { "نمونهٔ صدای داخلی ناقص است" }
-            }.onSuccess { handler.post(onDone) }
-             .onFailure { e -> handler.post { onError(e.message ?: "آماده‌سازی مدل فارسی ناموفق بود") } }
+            runCatching { installAssetsSync() }
+                .onSuccess { handler.post(onDone) }
+                .onFailure { e -> handler.post { onError(e.message ?: "آماده‌سازی مدل فارسی ناموفق بود") } }
         }.start()
     }
 
@@ -50,19 +42,46 @@ class PersianPocketNarration(private val context: Context) {
         onDone: (Result) -> Unit,
         onError: (String) -> Unit
     ) {
-        val normalized = PersianTextNormalizer.normalize(text)
-        val chunks = ScenePlanner.pocketTtsChunks(normalized)
+        val chunks = ScenePlanner.pocketTtsChunks(PersianTextNormalizer.normalize(text))
         if (chunks.isEmpty()) return onError("متن نریشن خالی است")
+        synthesizeGroups(
+            groups = chunks.map { listOf(it) },
+            referenceUri = referenceUri,
+            onProgress = onProgress,
+            onDone = { r -> onDone(Result(r.uris, r.totalDurationMs)) },
+            onError = onError
+        )
+    }
 
+    fun synthesizeScenes(
+        sceneTexts: List<String>,
+        referenceUri: Uri?,
+        onProgress: (Int, Int) -> Unit,
+        onDone: (SceneResult) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val groups = sceneTexts.map { text ->
+            ScenePlanner.pocketTtsChunks(PersianTextNormalizer.normalize(text))
+        }
+        if (groups.isEmpty() || groups.any { it.isEmpty() }) return onError("یکی از صحنه‌ها متن معتبر برای نریشن ندارد")
+        synthesizeGroups(groups, referenceUri, onProgress, onDone, onError)
+    }
+
+    private fun synthesizeGroups(
+        groups: List<List<String>>,
+        referenceUri: Uri?,
+        onProgress: (Int, Int) -> Unit,
+        onDone: (SceneResult) -> Unit,
+        onError: (String) -> Unit
+    ) {
         Thread {
             try {
                 installAssetsSync()
                 val voiceFile = if (referenceUri != null) copyUserVoice(referenceUri) else File(voicesDir, "example_voice.wav")
                 checkValidWav(voiceFile)
-
                 val runDir = File(generatedDir, System.currentTimeMillis().toString()).apply { mkdirs() }
                 val outputs = mutableListOf<Uri>()
-                var totalMs = 0L
+                val durations = mutableListOf<Long>()
 
                 OnDevicePocketTts(
                     modelsDir = modelDir.absolutePath,
@@ -75,26 +94,32 @@ class PersianPocketNarration(private val context: Context) {
                     maxTextTokens = 48
                 ).use { engine ->
                     running = engine
-                    chunks.forEachIndexed { index, chunk ->
-                        val out = File(runDir, "chunk_${(index + 1).toString().padStart(3, '0')}.wav")
+                    groups.forEachIndexed { sceneIndex, chunks ->
+                        val out = File(runDir, "scene_${(sceneIndex + 1).toString().padStart(3, '0')}.wav")
                         PcmWavWriter(out, 24_000).use { writer ->
-                            val ok = engine.synthesize(chunk, voiceFile.absolutePath, object : OnDevicePocketTts.AudioSink {
-                                override fun onAudio(samples: FloatArray): Boolean {
-                                    writer.write(samples)
-                                    return true
-                                }
-                            })
-                            check(ok) { "تولید بخش ${index + 1} نریشن فارسی ناموفق شد" }
+                            chunks.forEachIndexed { chunkIndex, chunk ->
+                                val ok = engine.synthesize(chunk, voiceFile.absolutePath, object : OnDevicePocketTts.AudioSink {
+                                    override fun onAudio(samples: FloatArray): Boolean {
+                                        writer.write(samples)
+                                        return true
+                                    }
+                                })
+                                check(ok) { "تولید صحنه ${sceneIndex + 1}، بخش ${chunkIndex + 1} ناموفق شد" }
+                                if (chunkIndex < chunks.lastIndex) writer.writeSilence(120)
+                            }
                         }
-                        check(out.length() > 2048L) { "خروجی بخش ${index + 1} خالی است" }
+                        check(out.length() > 2048L) { "خروجی صحنه ${sceneIndex + 1} خالی است" }
+                        val duration = wavDurationMs(out)
+                        check(duration > 200L) { "مدت نریشن صحنه ${sceneIndex + 1} معتبر نیست" }
                         outputs += Uri.fromFile(out)
-                        totalMs += wavDurationMs(out)
-                        handler.post { onProgress(index + 1, chunks.size) }
+                        durations += duration
+                        handler.post { onProgress(sceneIndex + 1, groups.size) }
                     }
                 }
                 running = null
-                check(totalMs > 300L) { "مدت نریشن تولیدشده معتبر نیست" }
-                handler.post { onDone(Result(outputs, totalMs)) }
+                val total = durations.sum()
+                check(total > 300L) { "مدت نریشن تولیدشده معتبر نیست" }
+                handler.post { onDone(SceneResult(outputs, durations, total)) }
             } catch (e: Throwable) {
                 running = null
                 handler.post { onError(e.message ?: "تولید نریشن فارسی ناموفق شد") }
@@ -107,6 +132,7 @@ class PersianPocketNarration(private val context: Context) {
         requiredModels().forEach { copyAssetIfNeeded("pockettts_fa/model/$it", File(modelDir, it)) }
         copyAssetIfNeeded("pockettts_fa/voices/example_voice.wav", File(voicesDir, "example_voice.wav"))
         check(modelInstalled()) { "مدل فارسی داخل APK ناقص است" }
+        check(defaultVoiceReady()) { "نمونهٔ صدای داخلی ناقص است" }
     }
 
     private fun copyUserVoice(uri: Uri): File {
@@ -161,6 +187,12 @@ class PersianPocketNarration(private val context: Context) {
             }
             out.write(buf.array())
             samplesWritten += samples.size
+        }
+
+        fun writeSilence(durationMs: Int) {
+            val count = (sampleRate * durationMs / 1000).coerceAtLeast(1)
+            out.write(ByteArray(count * 2))
+            samplesWritten += count
         }
 
         override fun close() {
