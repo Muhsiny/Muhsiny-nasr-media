@@ -12,8 +12,8 @@ android {
         applicationId = "af.muhsiny.docstudio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 50
-        versionName = "5.0.0"
+        versionCode = 60
+        versionName = "6.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         externalNativeBuild {
