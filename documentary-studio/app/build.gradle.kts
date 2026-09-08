@@ -6,14 +6,22 @@ plugins {
 android {
     namespace = "af.muhsiny.docstudio"
     compileSdk = 36
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "af.muhsiny.docstudio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 31
-        versionName = "3.0.1"
+        versionCode = 50
+        versionName = "5.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-O3"
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
     }
 
     compileOptions {
@@ -21,20 +29,25 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
-    testOptions {
-        unitTests.isIncludeAndroidResources = false
+    androidResources {
+        noCompress += listOf("onnx", "model", "wav")
     }
+
+    buildTypes {
+        release { isMinifyEnabled = false }
+    }
+
+    testOptions { unitTests.isIncludeAndroidResources = false }
 }
 
-kotlin {
-    jvmToolchain(17)
-}
+kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation("androidx.media3:media3-transformer:1.11.0")
