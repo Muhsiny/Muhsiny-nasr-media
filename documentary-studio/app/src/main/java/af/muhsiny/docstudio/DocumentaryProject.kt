@@ -13,11 +13,8 @@ data class DocumentaryProject(
     var mediaUris: MutableList<String> = mutableListOf(),
     var musicUri: String? = null,
     var narrationUri: String? = null,
-    var cloneEngineUrl: String = "http://10.0.2.2:8190",
+    var voiceMode: String = "pocket_default",
     var cloneReferenceUri: String? = null,
-    var cloneProfileId: String? = null,
-    var cloneProfileName: String? = null,
-    var useVoiceClone: Boolean = true,
     var lastOutputUri: String? = null,
     var createdAt: Long = System.currentTimeMillis(),
     var updatedAt: Long = System.currentTimeMillis()
@@ -29,11 +26,8 @@ data class DocumentaryProject(
         put("mediaUris", JSONArray(mediaUris))
         put("musicUri", musicUri ?: JSONObject.NULL)
         put("narrationUri", narrationUri ?: JSONObject.NULL)
-        put("cloneEngineUrl", cloneEngineUrl)
+        put("voiceMode", voiceMode)
         put("cloneReferenceUri", cloneReferenceUri ?: JSONObject.NULL)
-        put("cloneProfileId", cloneProfileId ?: JSONObject.NULL)
-        put("cloneProfileName", cloneProfileName ?: JSONObject.NULL)
-        put("useVoiceClone", useVoiceClone)
         put("lastOutputUri", lastOutputUri ?: JSONObject.NULL)
         put("createdAt", createdAt)
         put("updatedAt", updatedAt)
@@ -44,6 +38,8 @@ data class DocumentaryProject(
             val media = mutableListOf<String>()
             val a = o.optJSONArray("mediaUris") ?: JSONArray()
             for (i in 0 until a.length()) media += a.optString(i)
+            val legacyClone = o.optBoolean("useVoiceClone", false)
+            val mode = o.optString("voiceMode", if (legacyClone) "pocket_clone" else "pocket_default")
             return DocumentaryProject(
                 id = o.optString("id", UUID.randomUUID().toString()),
                 title = o.optString("title", "مستند جدید"),
@@ -51,11 +47,8 @@ data class DocumentaryProject(
                 mediaUris = media,
                 musicUri = o.optNullableString("musicUri"),
                 narrationUri = o.optNullableString("narrationUri"),
-                cloneEngineUrl = o.optString("cloneEngineUrl", "http://10.0.2.2:8190"),
+                voiceMode = mode,
                 cloneReferenceUri = o.optNullableString("cloneReferenceUri"),
-                cloneProfileId = o.optNullableString("cloneProfileId"),
-                cloneProfileName = o.optNullableString("cloneProfileName"),
-                useVoiceClone = o.optBoolean("useVoiceClone", true),
                 lastOutputUri = o.optNullableString("lastOutputUri"),
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                 updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
@@ -80,9 +73,7 @@ class ProjectRepository(private val context: Context) {
 
     fun create(title: String = "مستند جدید"): DocumentaryProject {
         val p = DocumentaryProject(title = title)
-        save(p)
-        setCurrent(p.id)
-        return p
+        save(p); setCurrent(p.id); return p
     }
 
     fun save(project: DocumentaryProject) {
@@ -109,9 +100,7 @@ class ProjectRepository(private val context: Context) {
         return id?.let(::load) ?: list().firstOrNull()?.also { setCurrent(it.id) } ?: create()
     }
 
-    fun setCurrent(id: String) {
-        prefs.edit().putString("current_project", id).apply()
-    }
+    fun setCurrent(id: String) { prefs.edit().putString("current_project", id).apply() }
 
     fun delete(id: String) {
         file(id).delete()
