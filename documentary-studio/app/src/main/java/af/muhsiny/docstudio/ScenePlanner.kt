@@ -6,6 +6,8 @@ data class PlannedScene(
     val weight: Int
 )
 
+data class ProjectCheck(val ok: Boolean, val message: String)
+
 object ScenePlanner {
     fun scenes(text: String, maxScenes: Int = 120): List<PlannedScene> {
         val raw = text
@@ -25,6 +27,30 @@ object ScenePlanner {
 
         return merged.take(maxScenes).mapIndexed { index, s ->
             PlannedScene(index + 1, s, s.count { !it.isWhitespace() }.coerceAtLeast(1))
+        }
+    }
+
+    fun rebuildProjectScenes(project: DocumentaryProject, maxScenes: Int = 80) {
+        val old = project.scenes.toList()
+        val planned = scenes(project.script, maxScenes)
+        project.scenes = planned.mapIndexed { index, p ->
+            val previous = old.getOrNull(index)
+            SceneItem(
+                id = previous?.id ?: java.util.UUID.randomUUID().toString(),
+                text = p.text,
+                mediaUri = previous?.mediaUri ?: project.mediaUris.getOrNull(index % project.mediaUris.size.coerceAtLeast(1)),
+                sfxUri = previous?.sfxUri,
+                cropMode = previous?.cropMode ?: "crop",
+                clipStartMs = previous?.clipStartMs ?: 0L,
+                subtitle = previous?.subtitle ?: true
+            )
+        }.toMutableList()
+    }
+
+    fun autoAssignMedia(project: DocumentaryProject) {
+        if (project.mediaUris.isEmpty()) return
+        project.scenes.forEachIndexed { index, scene ->
+            scene.mediaUri = project.mediaUris[index % project.mediaUris.size]
         }
     }
 
@@ -96,19 +122,56 @@ object ScenePlanner {
         return chunks
     }
 
+    fun allocateSceneDurations(sceneTexts: List<String>, totalDurationMs: Long): List<Long> {
+        if (sceneTexts.isEmpty() || totalDurationMs <= 0L) return emptyList()
+        val weights = sceneTexts.map { it.count { c -> !c.isWhitespace() }.coerceAtLeast(1) }
+        val totalWeight = weights.sum().coerceAtLeast(1)
+        var used = 0L
+        return weights.mapIndexed { index, weight ->
+            if (index == weights.lastIndex) (totalDurationMs - used).coerceAtLeast(500L)
+            else {
+                val d = (totalDurationMs * weight / totalWeight).coerceAtLeast(900L)
+                used += d
+                d
+            }
+        }
+    }
+
+    fun estimateDurationMs(text: String, wordsPerMinute: Int = 125): Long {
+        val words = text.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+        if (words == 0) return 0L
+        return (words * 60_000L / wordsPerMinute.coerceIn(80, 220)).coerceAtLeast(1000L)
+    }
+
+    fun validate(project: DocumentaryProject): List<ProjectCheck> {
+        val checks = mutableListOf<ProjectCheck>()
+        checks += ProjectCheck(project.title.isNotBlank(), if (project.title.isNotBlank()) "عنوان پروژه آماده است" else "عنوان پروژه خالی است")
+        checks += ProjectCheck(project.script.isNotBlank(), if (project.script.isNotBlank()) "سناریو موجود است" else "سناریو خالی است")
+        checks += ProjectCheck(project.scenes.isNotEmpty(), if (project.scenes.isNotEmpty()) "${project.scenes.size} صحنه آماده است" else "هیچ صحنه‌ای ساخته نشده")
+        val missingMedia = project.scenes.count { it.mediaUri.isNullOrBlank() }
+        checks += ProjectCheck(missingMedia == 0, if (missingMedia == 0) "برای همهٔ صحنه‌ها رسانه تعیین شده" else "$missingMedia صحنه رسانه ندارد")
+        val emptyScenes = project.scenes.count { it.text.isBlank() }
+        checks += ProjectCheck(emptyScenes == 0, if (emptyScenes == 0) "متن همهٔ صحنه‌ها معتبر است" else "$emptyScenes صحنه متن ندارد")
+        if (project.voiceMode == "pocket_clone") checks += ProjectCheck(!project.cloneReferenceUri.isNullOrBlank(), if (!project.cloneReferenceUri.isNullOrBlank()) "نمونهٔ کلون انتخاب شده" else "نمونهٔ WAV کلون انتخاب نشده")
+        if (project.voiceMode == "external_audio") checks += ProjectCheck(!project.narrationUri.isNullOrBlank(), if (!project.narrationUri.isNullOrBlank()) "نریشن آماده انتخاب شده" else "نریشن MP3/WAV انتخاب نشده")
+        checks += ProjectCheck(project.musicVolume <= 35, if (project.musicVolume <= 35) "ولوم موسیقی مناسب نریشن است" else "موسیقی احتمالاً روی نریشن غالب می‌شود")
+        return checks
+    }
+
     fun buildSrt(text: String, totalDurationMs: Long): String {
         val scenes = scenes(text)
-        if (scenes.isEmpty() || totalDurationMs <= 0) return ""
-        val totalWeight = scenes.sumOf { it.weight }.coerceAtLeast(1)
+        return buildSrtFromScenes(scenes.map { it.text }, allocateSceneDurations(scenes.map { it.text }, totalDurationMs))
+    }
+
+    fun buildSrtFromScenes(sceneTexts: List<String>, durationsMs: List<Long>): String {
+        if (sceneTexts.isEmpty() || durationsMs.size != sceneTexts.size) return ""
         var cursor = 0L
         return buildString {
-            scenes.forEachIndexed { i, scene ->
-                val proportional = totalDurationMs * scene.weight / totalWeight
-                val duration = if (i == scenes.lastIndex) totalDurationMs - cursor else proportional.coerceAtLeast(900L)
-                val end = (cursor + duration).coerceAtMost(totalDurationMs)
+            sceneTexts.forEachIndexed { i, scene ->
+                val end = cursor + durationsMs[i].coerceAtLeast(1L)
                 append(i + 1).append('\n')
                 append(formatSrt(cursor)).append(" --> ").append(formatSrt(end)).append('\n')
-                append(scene.text).append("\n\n")
+                append(scene.trim()).append("\n\n")
                 cursor = end
             }
         }
