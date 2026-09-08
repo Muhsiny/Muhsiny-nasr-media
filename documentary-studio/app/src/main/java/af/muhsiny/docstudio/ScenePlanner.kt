@@ -16,14 +16,24 @@ object ScenePlanner {
             .map { it.trim() }
             .filter { it.isNotBlank() }
 
+        // Keep meaningful sentences as independent timeline scenes. Only attach
+        // genuinely tiny fragments (headings, short tails) to a neighbor.
         val merged = mutableListOf<String>()
         var carry = ""
         for (part in raw) {
-            val candidate = if (carry.isBlank()) part else "$carry $part"
-            if (candidate.length < 55) carry = candidate
-            else { merged += candidate; carry = "" }
+            if (part.length < 24) {
+                carry = if (carry.isBlank()) part else "$carry $part"
+            } else if (carry.isNotBlank()) {
+                merged += "$carry $part".trim()
+                carry = ""
+            } else {
+                merged += part
+            }
         }
-        if (carry.isNotBlank()) merged += carry
+        if (carry.isNotBlank()) {
+            if (merged.isNotEmpty()) merged[merged.lastIndex] = "${merged.last()} $carry".trim()
+            else merged += carry
+        }
 
         return merged.take(maxScenes).mapIndexed { index, s ->
             PlannedScene(index + 1, s, s.count { !it.isWhitespace() }.coerceAtLeast(1))
@@ -124,17 +134,29 @@ object ScenePlanner {
 
     fun allocateSceneDurations(sceneTexts: List<String>, totalDurationMs: Long): List<Long> {
         if (sceneTexts.isEmpty() || totalDurationMs <= 0L) return emptyList()
-        val weights = sceneTexts.map { it.count { c -> !c.isWhitespace() }.coerceAtLeast(1) }
-        val totalWeight = weights.sum().coerceAtLeast(1)
-        var used = 0L
-        return weights.mapIndexed { index, weight ->
-            if (index == weights.lastIndex) (totalDurationMs - used).coerceAtLeast(500L)
-            else {
-                val d = (totalDurationMs * weight / totalWeight).coerceAtLeast(900L)
-                used += d
-                d
-            }
+        if (sceneTexts.size == 1) return listOf(totalDurationMs)
+        val count = sceneTexts.size
+        if (totalDurationMs < count) {
+            return List(count) { index -> if (index < totalDurationMs.toInt()) 1L else 0L }
         }
+        val weights = sceneTexts.map { it.count { c -> !c.isWhitespace() }.coerceAtLeast(1).toLong() }
+        val totalWeight = weights.sum().coerceAtLeast(1L)
+        val out = LongArray(count) { index -> (totalDurationMs * weights[index] / totalWeight).coerceAtLeast(1L) }
+        var delta = totalDurationMs - out.sum()
+        var cursor = 0
+        while (delta != 0L) {
+            val i = cursor % count
+            if (delta > 0L) {
+                out[i] += 1L
+                delta--
+            } else if (out[i] > 1L) {
+                out[i] -= 1L
+                delta++
+            }
+            cursor++
+            if (cursor > count * 10_000 && delta != 0L) break
+        }
+        return out.toList()
     }
 
     fun estimateDurationMs(text: String, wordsPerMinute: Int = 125): Long {
