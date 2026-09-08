@@ -68,7 +68,8 @@ class ExportEngine(private val context: Context) {
     ) {
         val scenes = project.scenes.filter { it.text.isNotBlank() }
         if (scenes.isEmpty()) return onError("هیچ صحنهٔ معتبری وجود ندارد")
-        if (narrationUris.size != scenes.size) return onError("تعداد فایل‌های نریشن با صحنه‌ها برابر نیست")
+        if (narrationUris.isEmpty()) return onError("نریشن موجود نیست")
+        if (narrationUris.size != 1 && narrationUris.size != scenes.size) return onError("ساختار فایل‌های نریشن با تایم‌لاین سازگار نیست")
         if (sceneDurationsMs.size != scenes.size || sceneDurationsMs.any { it <= 0L }) return onError("زمان‌بندی صحنه‌ها معتبر نیست")
         if (scenes.any { it.mediaUri.isNullOrBlank() }) return onError("برای همهٔ صحنه‌ها رسانه تعیین کن")
         if (transformer != null) return onError("یک رندر دیگر در حال اجرا است")
@@ -79,11 +80,7 @@ class ExportEngine(private val context: Context) {
                 .addItems(visualItems)
                 .build()
 
-            val narrationItems = narrationUris.map { uri ->
-                EditedMediaItem.Builder(MediaItem.fromUri(uri))
-                    .setEffects(audioGain(project.narrationVolume / 100f))
-                    .build()
-            }
+            val narrationItems = buildNarrationItems(project, narrationUris, sceneDurationsMs)
             val narrationSequence = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
                 .addItems(narrationItems)
                 .build()
@@ -141,6 +138,26 @@ class ExportEngine(private val context: Context) {
         }
     }
 
+    private fun buildNarrationItems(project: DocumentaryProject, narrationUris: List<Uri>, durations: List<Long>): List<EditedMediaItem> {
+        val gain = project.narrationVolume / 100f
+        if (narrationUris.size == durations.size) {
+            return narrationUris.map { uri -> EditedMediaItem.Builder(MediaItem.fromUri(uri)).setEffects(audioGain(gain)).build() }
+        }
+        val uri = narrationUris.first()
+        val total = mediaDurationMs(uri)
+        var cursor = 0L
+        return durations.mapIndexed { index, requested ->
+            val end = if (index == durations.lastIndex) total.coerceAtLeast(cursor + requested) else cursor + requested
+            val clip = MediaItem.ClippingConfiguration.Builder()
+                .setStartPositionMs(cursor)
+                .setEndPositionMs(end)
+                .build()
+            val item = MediaItem.Builder().setUri(uri).setClippingConfiguration(clip).build()
+            cursor += requested
+            EditedMediaItem.Builder(item).setEffects(audioGain(gain)).build()
+        }
+    }
+
     private fun buildVisualItems(project: DocumentaryProject, scenes: List<SceneItem>, durations: List<Long>): List<EditedMediaItem> {
         val output = mutableListOf<EditedMediaItem>()
         scenes.forEachIndexed { index, scene ->
@@ -160,7 +177,8 @@ class ExportEngine(private val context: Context) {
     }
 
     private fun buildRepeatedVideo(uri: Uri, targetMs: Long, requestedStartMs: Long, effects: Effects): List<EditedMediaItem> {
-        val sourceMs = mediaDurationMs(uri).coerceAtLeast(targetMs)
+        val detected = mediaDurationMs(uri)
+        val sourceMs = if (detected > 300L) detected else targetMs
         val start = requestedStartMs.coerceIn(0L, (sourceMs - 300L).coerceAtLeast(0L))
         val available = (sourceMs - start).coerceAtLeast(300L)
         var remaining = targetMs
@@ -184,9 +202,7 @@ class ExportEngine(private val context: Context) {
         val videoEffects = mutableListOf<Effect>(Presentation.createForWidthAndHeight(width, height, layout))
         val overlays = mutableListOf<TextureOverlay>()
 
-        if (project.subtitlesEnabled && scene.subtitle && scene.text.isNotBlank()) {
-            overlays += subtitleOverlay(scene.text, project.subtitleSize, height)
-        }
+        if (project.subtitlesEnabled && scene.subtitle && scene.text.isNotBlank()) overlays += subtitleOverlay(scene.text, project.subtitleSize, height)
         project.logoUri?.let { raw ->
             val settings = StaticOverlaySettings.Builder()
                 .setBackgroundFrameAnchor(0.90f, 0.88f)
@@ -244,7 +260,8 @@ class ExportEngine(private val context: Context) {
     }
 
     private fun buildRepeatedAudio(uri: Uri, targetMs: Long, gain: Float): List<EditedMediaItem> {
-        val sourceMs = mediaDurationMs(uri).coerceAtLeast(1000L)
+        val detected = mediaDurationMs(uri)
+        val sourceMs = if (detected > 100L) detected else 1000L
         var remaining = targetMs
         val out = mutableListOf<EditedMediaItem>()
         while (remaining > 0L) {
@@ -276,14 +293,12 @@ class ExportEngine(private val context: Context) {
         }
     }
 
-    private fun mediaDurationMs(uri: Uri): Long {
-        return runCatching {
-            val r = MediaMetadataRetriever()
-            r.setDataSource(context, uri)
-            val ms = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            r.release(); ms
-        }.getOrDefault(0L)
-    }
+    private fun mediaDurationMs(uri: Uri): Long = runCatching {
+        val r = MediaMetadataRetriever()
+        if (uri.scheme == "file") r.setDataSource(uri.path) else r.setDataSource(context, uri)
+        val ms = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        r.release(); ms
+    }.getOrDefault(0L)
 
     private fun outputSize(project: DocumentaryProject): Pair<Int, Int> {
         val long = if (project.resolution == "720p") 1280 else 1920
@@ -330,28 +345,25 @@ class ExportEngine(private val context: Context) {
         return file
     }
 
-    private fun saveVideo(title: String, temp: File): Uri? {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Video.Media.DISPLAY_NAME, safeName(title) + "_${System.currentTimeMillis()}.mp4")
-                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/DocStudio")
-                    put(MediaStore.Video.Media.IS_PENDING, 1)
-                }
-                val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
-                context.contentResolver.openOutputStream(uri)?.use { out -> temp.inputStream().use { it.copyTo(out) } } ?: return null
-                values.clear(); values.put(MediaStore.Video.Media.IS_PENDING, 0)
-                context.contentResolver.update(uri, values, null, null)
-                uri
-            } else {
-                val dir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: return null
-                val out = File(dir, safeName(title) + "_${System.currentTimeMillis()}.mp4")
-                temp.copyTo(out, overwrite = true)
-                Uri.fromFile(out)
+    private fun saveVideo(title: String, temp: File): Uri? = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, safeName(title) + "_${System.currentTimeMillis()}.mp4")
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/DocStudio")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
             }
-        } catch (_: Exception) { null }
-    }
+            val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+            context.contentResolver.openOutputStream(uri)?.use { out -> temp.inputStream().use { it.copyTo(out) } } ?: return null
+            values.clear(); values.put(MediaStore.Video.Media.IS_PENDING, 0)
+            context.contentResolver.update(uri, values, null, null)
+            uri
+        } else {
+            val dir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: return null
+            val out = File(dir, safeName(title) + "_${System.currentTimeMillis()}.mp4")
+            temp.copyTo(out, overwrite = true); Uri.fromFile(out)
+        }
+    } catch (_: Exception) { null }
 
     private fun saveSrt(title: String, content: String): Uri? {
         if (content.isBlank()) return null
