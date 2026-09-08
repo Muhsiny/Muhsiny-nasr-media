@@ -18,18 +18,43 @@ object ScenePlanner {
         var carry = ""
         for (part in raw) {
             val candidate = if (carry.isBlank()) part else "$carry $part"
-            if (candidate.length < 55) {
-                carry = candidate
-            } else {
-                merged += candidate
-                carry = ""
-            }
+            if (candidate.length < 55) carry = candidate
+            else { merged += candidate; carry = "" }
         }
         if (carry.isNotBlank()) merged += carry
 
         return merged.take(maxScenes).mapIndexed { index, s ->
             PlannedScene(index + 1, s, s.count { !it.isWhitespace() }.coerceAtLeast(1))
         }
+    }
+
+    fun pocketTtsChunks(text: String, maxWords: Int = 24, maxChars: Int = 180): List<String> {
+        require(maxWords in 8..40)
+        require(maxChars in 80..260)
+        val normalized = text.replace("\r", "").trim()
+        if (normalized.isBlank()) return emptyList()
+        val clauses = normalized
+            .split(Regex("(?<=[.!؟؛،,:])\\s+|\\n+"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        val result = mutableListOf<String>()
+        for (clause in clauses) {
+            val words = clause.split(Regex("\\s+")).filter { it.isNotBlank() }
+            var current = mutableListOf<String>()
+            var chars = 0
+            for (word in words) {
+                val added = word.length + if (current.isEmpty()) 0 else 1
+                if (current.isNotEmpty() && (current.size >= maxWords || chars + added > maxChars)) {
+                    result += current.joinToString(" ")
+                    current = mutableListOf(); chars = 0
+                }
+                current += word
+                chars += word.length + if (current.size == 1) 0 else 1
+            }
+            if (current.isNotEmpty()) result += current.joinToString(" ")
+        }
+        return result.filter { it.isNotBlank() }
     }
 
     fun ttsChunks(text: String, maxChars: Int = 3000): List<String> {
