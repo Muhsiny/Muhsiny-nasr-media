@@ -345,25 +345,28 @@ class ExportEngine(private val context: Context) {
         return file
     }
 
-    private fun saveVideo(title: String, temp: File): Uri? = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, safeName(title) + "_${System.currentTimeMillis()}.mp4")
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/DocStudio")
-                put(MediaStore.Video.Media.IS_PENDING, 1)
+    private fun saveVideo(title: String, temp: File): Uri? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, safeName(title) + "_${System.currentTimeMillis()}.mp4")
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/DocStudio")
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+                val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+                context.contentResolver.openOutputStream(uri)?.use { out -> temp.inputStream().use { it.copyTo(out) } } ?: return null
+                values.clear(); values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                context.contentResolver.update(uri, values, null, null)
+                uri
+            } else {
+                val dir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: return null
+                val out = File(dir, safeName(title) + "_${System.currentTimeMillis()}.mp4")
+                temp.copyTo(out, overwrite = true)
+                Uri.fromFile(out)
             }
-            val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
-            context.contentResolver.openOutputStream(uri)?.use { out -> temp.inputStream().use { it.copyTo(out) } } ?: return null
-            values.clear(); values.put(MediaStore.Video.Media.IS_PENDING, 0)
-            context.contentResolver.update(uri, values, null, null)
-            uri
-        } else {
-            val dir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: return null
-            val out = File(dir, safeName(title) + "_${System.currentTimeMillis()}.mp4")
-            temp.copyTo(out, overwrite = true); Uri.fromFile(out)
-        }
-    } catch (_: Exception) { null }
+        } catch (_: Exception) { null }
+    }
 
     private fun saveSrt(title: String, content: String): Uri? {
         if (content.isBlank()) return null
