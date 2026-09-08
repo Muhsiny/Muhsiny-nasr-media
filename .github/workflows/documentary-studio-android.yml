@@ -1,10 +1,10 @@
-name: Build Documentary Studio V5 Standalone
+name: Build Documentary Studio V6 PRO
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - feature/documentary-studio-v5-standalone
+      - feature/documentary-studio-v6-pro
     paths:
       - 'documentary-studio/**'
       - '.github/workflows/documentary-studio-android.yml'
@@ -12,7 +12,7 @@ on:
 jobs:
   build-test-real:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
 
@@ -84,24 +84,28 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Run unit tests
+      - name: Run V6 unit tests
         working-directory: documentary-studio
         run: gradle :app:testDebugUnitTest --stacktrace
 
-      - name: Build real APK with bundled Persian model
+      - name: Build V6 APK with bundled Persian model
         working-directory: documentary-studio
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Audit APK before device test
+      - name: Audit real V6 APK before device test
         run: |
+          set -euxo pipefail
           APK=documentary-studio/app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
+          test "$(stat -c%s "$APK")" -gt 150000000
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libpockettts_jni.so'
           unzip -l "$APK" | grep -q 'lib/x86_64/libpockettts_jni.so'
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libonnxruntime.so'
           unzip -l "$APK" | grep -q 'assets/pockettts_fa/model/flow_lm_main_int8.onnx'
           unzip -l "$APK" | grep -q 'assets/pockettts_fa/voices/example_voice.wav'
+          unzip -l "$APK" | grep -q 'classes.dex'
           ls -lh "$APK"
+          sha256sum "$APK"
 
       - name: Enable KVM
         run: |
@@ -109,20 +113,20 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
-      - name: Android 15 real UI + Persian clone + MP4 tests
+      - name: Android 15 professional UI + timeline render + Persian on-device tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           target: default
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -partition-size 3072
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -partition-size 4096
           disable-animations: true
           script: cd documentary-studio && gradle :app:connectedDebugAndroidTest --stacktrace
 
-      - name: Upload only after all tests pass
+      - name: Upload only after every V6 test passes
         uses: actions/upload-artifact@v4
         with:
-          name: Documentary-Studio-V5-Standalone-Persian-Clone-TESTED
+          name: Documentary-Studio-V6-PRO-FINAL-TESTED
           path: documentary-studio/app/build/outputs/apk/debug/app-debug.apk
           compression-level: 0
           retention-days: 30
