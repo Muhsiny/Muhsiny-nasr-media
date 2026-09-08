@@ -1,52 +1,128 @@
-name: Build Documentary Studio APK
+name: Build Documentary Studio V5 Standalone
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - feature/documentary-studio-v1
-      - feature/documentary-studio-standalone-v2
-      - feature/documentary-studio-root-v3
+      - feature/documentary-studio-v5-standalone
     paths:
       - 'documentary-studio/**'
       - '.github/workflows/documentary-studio-android.yml'
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
+  build-test-real:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: android-actions/setup-android@v3
-      - name: Install Android SDK
-        run: yes | sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Install Android SDK NDK and CMake
+        run: |
+          yes | sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pockettts-farsi-onnx-validated
+          path: /tmp/pocket-model-artifact
+          github-token: ${{ github.token }}
+          run-id: 34188576763
+
+      - name: Bundle only validated INT8 Persian model files
+        run: |
+          set -euxo pipefail
+          ASSETS=documentary-studio/app/src/main/assets/pockettts_fa
+          mkdir -p "$ASSETS/model" "$ASSETS/voices"
+          for f in tokenizer.model mimi_encoder.onnx text_conditioner.onnx flow_lm_main_int8.onnx flow_lm_flow_int8.onnx mimi_decoder_int8.onnx; do
+            src=$(find /tmp/pocket-model-artifact -type f -name "$f" | head -1)
+            test -n "$src"
+            cp "$src" "$ASSETS/model/$f"
+          done
+          curl -fL --retry 5 --retry-delay 2 \
+            https://huggingface.co/mehdi-hf/pocket-tts-farsi/resolve/main/example_voice.wav \
+            -o "$ASSETS/voices/example_voice.wav"
+          test -s "$ASSETS/voices/example_voice.wav"
+          du -sh "$ASSETS"
+
+      - name: Prepare native PocketTTS Android runtime
+        run: |
+          set -euxo pipefail
+          git clone --depth=1 https://github.com/The-unknown-Shadowman/PocketTTS-Android-Engine.git /tmp/pocket-android
+          mkdir -p documentary-studio/vendor/PocketTTS.cpp
+          mkdir -p documentary-studio/app/src/main/cpp
+          cp /tmp/pocket-android/vendor/PocketTTS.cpp/pocket_tts.cpp documentary-studio/vendor/PocketTTS.cpp/pocket_tts.cpp
+          cp /tmp/pocket-android/app/src/main/cpp/CMakeLists.txt documentary-studio/app/src/main/cpp/CMakeLists.txt
+          cp /tmp/pocket-android/app/src/main/cpp/jni_bridge.cpp documentary-studio/app/src/main/cpp/jni_bridge.cpp
+          sed -i 's/Java_org_pockettts_android_engine_NativePocketTts_/Java_af_muhsiny_docstudio_OnDevicePocketTts_/g' documentary-studio/app/src/main/cpp/jni_bridge.cpp
+
+      - name: Prepare verified ONNX Runtime Android native libraries
+        run: |
+          set -euxo pipefail
+          VER=1.20.0
+          AAR_SHA=07a8f71ef890afed8c6087a56220e6d558a492804276ee2dd7cb7f6262242027
+          SRC_SHA=5d0aaced52921b86f3f2b2eaac18cbfc96184d73e83baf2553c94d9d306c4de9
+          mkdir -p /tmp/ort documentary-studio/app/src/main/jniLibs/arm64-v8a documentary-studio/app/src/main/jniLibs/x86_64 documentary-studio/app/src/main/third_party
+          curl -fL "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${VER}/onnxruntime-android-${VER}.aar" -o /tmp/ort/ort.aar
+          echo "$AAR_SHA  /tmp/ort/ort.aar" | sha256sum -c -
+          unzip -p /tmp/ort/ort.aar jni/arm64-v8a/libonnxruntime.so > documentary-studio/app/src/main/jniLibs/arm64-v8a/libonnxruntime.so
+          unzip -p /tmp/ort/ort.aar jni/x86_64/libonnxruntime.so > documentary-studio/app/src/main/jniLibs/x86_64/libonnxruntime.so
+          curl -fL "https://github.com/microsoft/onnxruntime/archive/refs/tags/v${VER}.tar.gz" -o /tmp/ort/src.tar.gz
+          echo "$SRC_SHA  /tmp/ort/src.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/ort/src.tar.gz -C /tmp/ort
+          mkdir -p documentary-studio/app/src/main/third_party/onnxruntime
+          cp -R "/tmp/ort/onnxruntime-${VER}/include" documentary-studio/app/src/main/third_party/onnxruntime/include
+          test -s documentary-studio/app/src/main/jniLibs/arm64-v8a/libonnxruntime.so
+          test -s documentary-studio/app/src/main/jniLibs/x86_64/libonnxruntime.so
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+
       - name: Run unit tests
         working-directory: documentary-studio
         run: gradle :app:testDebugUnitTest --stacktrace
-      - name: Build debug APK
+
+      - name: Build real APK with bundled Persian model
         working-directory: documentary-studio
         run: gradle :app:assembleDebug --stacktrace
+
+      - name: Audit APK before device test
+        run: |
+          APK=documentary-studio/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libpockettts_jni.so'
+          unzip -l "$APK" | grep -q 'lib/x86_64/libpockettts_jni.so'
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libonnxruntime.so'
+          unzip -l "$APK" | grep -q 'assets/pockettts_fa/model/flow_lm_main_int8.onnx'
+          unzip -l "$APK" | grep -q 'assets/pockettts_fa/voices/example_voice.wav'
+          ls -lh "$APK"
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
-      - name: Boot Android and run UI smoke test
+
+      - name: Android 15 real UI + Persian clone + MP4 tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           target: default
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -partition-size 3072
           disable-animations: true
           script: cd documentary-studio && gradle :app:connectedDebugAndroidTest --stacktrace
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload only after all tests pass
+        uses: actions/upload-artifact@v4
         with:
-          name: documentary-studio-root-v3-apk
+          name: Documentary-Studio-V5-Standalone-Persian-Clone-TESTED
           path: documentary-studio/app/build/outputs/apk/debug/app-debug.apk
+          compression-level: 0
+          retention-days: 30
