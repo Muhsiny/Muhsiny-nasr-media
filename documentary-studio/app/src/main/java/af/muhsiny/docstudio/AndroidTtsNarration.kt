@@ -58,16 +58,18 @@ class AndroidTtsNarration(
                 val done = index + 1
                 handler.post { onProgress(done, sceneTexts.size) }
                 index++
-                if (index >= sceneTexts.size) {
-                    handler.post { onDone(Result(uris, durations, durations.sum())) }
-                } else synthesizeNext()
+                if (index >= sceneTexts.size) handler.post { onDone(Result(uris, durations, durations.sum())) }
+                else synthesizeNext()
             }
         })
 
-        synthesizeNext = {
-            if (cancelled) return@synthesizeNext
+        synthesizeNext = next@{
+            if (cancelled) return@next
             val normalized = PersianTextNormalizer.normalize(sceneTexts[index])
-            if (normalized.length > 3600) return@synthesizeNext finishError("متن صحنه ${index + 1} برای Android TTS بیش از حد طولانی است؛ آن را به دو صحنه تقسیم کن")
+            if (normalized.length > 3600) {
+                finishError("متن صحنه ${index + 1} برای Android TTS بیش از حد طولانی است؛ آن را به دو صحنه تقسیم کن")
+                return@next
+            }
             val id = "docstudio_scene_${index}_${System.nanoTime()}"
             val result = tts.synthesizeToFile(normalized, Bundle(), files[index], id)
             if (result != TextToSpeech.SUCCESS) finishError("شروع TTS صحنه ${index + 1} ناموفق بود")
