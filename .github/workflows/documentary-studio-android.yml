@@ -10,6 +10,10 @@ on:
       - 'open-studio-worker/**'
       - '.github/workflows/documentary-studio-android.yml'
 
+concurrency:
+  group: documentary-studio-v7-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test-real:
     runs-on: ubuntu-24.04
@@ -28,17 +32,29 @@ jobs:
         run: |
           yes | sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
-      - name: Validate open local worker and capability contract
+      - name: Validate open local worker capability and transcription contracts
         run: |
           set -euxo pipefail
           python -m py_compile open-studio-worker/server.py open-studio-worker/ci_stub_dependencies.py
           mkdir -p open-studio-worker/workflows
           echo '{}' > open-studio-worker/workflows/image.json
           echo '{}' > open-studio-worker/workflows/video.json
+          cat >/tmp/fake-whisper <<'PY'
+          #!/usr/bin/env python3
+          import sys
+          args=sys.argv
+          out=args[args.index('-of')+1]
+          with open(out + '.txt','w',encoding='utf-8') as f:
+              f.write('رونویسی آزمایشی فارسی برای تست V7')
+          PY
+          chmod +x /tmp/fake-whisper
+          printf 'ci-model' >/tmp/whisper-model.bin
           python open-studio-worker/ci_stub_dependencies.py >/tmp/docstudio-stubs.log 2>&1 &
           STUB_PID=$!
           DOCSTUDIO_IMAGE_WORKFLOW="$PWD/open-studio-worker/workflows/image.json" \
           DOCSTUDIO_VIDEO_WORKFLOW="$PWD/open-studio-worker/workflows/video.json" \
+          DOCSTUDIO_WHISPER_BIN=/tmp/fake-whisper \
+          DOCSTUDIO_WHISPER_MODEL=/tmp/whisper-model.bin \
           python open-studio-worker/server.py --host 127.0.0.1 --port 8190 --token ci-token >/tmp/docstudio-worker.log 2>&1 &
           WORKER_PID=$!
           sleep 2
@@ -50,7 +66,17 @@ jobs:
           assert x['director_ai'] is True
           assert x['image'] is True
           assert x['video'] is True
-          assert 'ollama' in x['engines'] and 'comfyui' in x['engines']
+          assert x['transcribe'] is True
+          assert x['upscale'] is False
+          assert 'ollama' in x['engines'] and 'comfyui' in x['engines'] and 'whisper.cpp' in x['engines']
+          PY
+          head -c 4096 /dev/urandom >/tmp/ci-audio.wav
+          curl -fsS -H 'Authorization: Bearer ci-token' -H 'Content-Type: application/octet-stream' -H 'X-Filename: ci-audio.wav' --data-binary @/tmp/ci-audio.wav http://127.0.0.1:8190/v1/transcribe | tee /tmp/transcript.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/transcript.json'))
+          assert 'رونویسی آزمایشی' in x['text']
+          assert x['engine'] == 'whisper.cpp'
           PY
           kill "$WORKER_PID" "$STUB_PID" || true
 
@@ -143,7 +169,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
-      - name: Android 15 V6 render + Persian on-device + V7 open-AI integration tests
+      - name: Android 15 V6 render + Persian on-device + V7 open-AI + Whisper integration tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -155,10 +181,20 @@ jobs:
             mkdir -p open-studio-worker/workflows
             echo '{}' > open-studio-worker/workflows/image.json
             echo '{}' > open-studio-worker/workflows/video.json
+            cat >/tmp/fake-whisper <<'PY'
+            #!/usr/bin/env python3
+            import sys
+            args=sys.argv
+            out=args[args.index('-of')+1]
+            with open(out + '.txt','w',encoding='utf-8') as f:
+                f.write('رونویسی آزمایشی فارسی برای تست V7')
+            PY
+            chmod +x /tmp/fake-whisper
+            printf 'ci-model' >/tmp/whisper-model.bin
             python open-studio-worker/ci_stub_dependencies.py >/tmp/docstudio-stubs-android.log 2>&1 &
-            DOCSTUDIO_IMAGE_WORKFLOW="$PWD/open-studio-worker/workflows/image.json" DOCSTUDIO_VIDEO_WORKFLOW="$PWD/open-studio-worker/workflows/video.json" python open-studio-worker/server.py --host 0.0.0.0 --port 8190 --token ci-token >/tmp/docstudio-worker-android.log 2>&1 &
+            DOCSTUDIO_IMAGE_WORKFLOW="$PWD/open-studio-worker/workflows/image.json" DOCSTUDIO_VIDEO_WORKFLOW="$PWD/open-studio-worker/workflows/video.json" DOCSTUDIO_WHISPER_BIN=/tmp/fake-whisper DOCSTUDIO_WHISPER_MODEL=/tmp/whisper-model.bin python open-studio-worker/server.py --host 0.0.0.0 --port 8190 --token ci-token >/tmp/docstudio-worker-android.log 2>&1 &
             sleep 2
-            curl -fsS -H 'Authorization: Bearer ci-token' http://127.0.0.1:8190/v1/capabilities
+            curl -fsS -H 'Authorization: Bearer ci-token' http://127.0.0.1:8190/v1/capabilities | grep -q '"transcribe": true'
             cd documentary-studio
             gradle :app:connectedDebugAndroidTest --stacktrace
 
