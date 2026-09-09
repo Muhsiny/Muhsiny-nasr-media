@@ -43,6 +43,20 @@ class V7MainActivity : Activity() {
         refreshPlanPreview()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (!::repo.isInitialized) return
+        val previousId = if (::project.isInitialized) project.id else null
+        project = repo.currentOrCreate().also { it.ensureScenes() }
+        if (::planText.isInitialized) {
+            refreshPlanPreview()
+            applyPlanButton.enable(loadPlan() != null)
+            if (previousId != null && previousId != project.id) {
+                setStatus("پروژهٔ فعال به‌روز شد: ${project.title}")
+            }
+        }
+    }
+
     override fun onDestroy() {
         executor.shutdownNow()
         super.onDestroy()
@@ -147,6 +161,7 @@ class V7MainActivity : Activity() {
     }
 
     private fun applyPlanToTimeline() {
+        project = repo.currentOrCreate().also { it.ensureScenes() }
         val plan = loadPlan() ?: return setStatus("پلان ذخیره‌شده وجود ندارد")
         val scenes = plan.optJSONArray("scenes") ?: return setStatus("پلان صحنه ندارد")
         if (scenes.length() == 0) return setStatus("پلان صحنه ندارد")
@@ -175,9 +190,9 @@ class V7MainActivity : Activity() {
         val caps = capabilities ?: return setStatus("اول موتور را بررسی کن")
         if (kind == "image" && !caps.image) return setStatus("موتور تصویر آماده نیست")
         if (kind == "video" && !caps.video) return setStatus("موتور ویدیو آماده نیست")
+        project = repo.currentOrCreate().also { it.ensureScenes() }
         val plan = loadPlan() ?: return setStatus("اول پلان هوشمند بساز")
         val planned = plan.optJSONArray("scenes") ?: return setStatus("پلان صحنه ندارد")
-        project = repo.currentOrCreate().also { it.ensureScenes() }
         val dims = generationDimensions(project.aspectRatio)
         imageButton.enable(false); videoButton.enable(false)
         setStatus("شروع تولید رسانه…")
