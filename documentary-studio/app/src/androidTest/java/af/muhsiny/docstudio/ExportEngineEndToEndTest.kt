@@ -88,12 +88,18 @@ class ExportEngineEndToEndTest {
             val retriever = MediaMetadataRetriever()
             retriever.setDataSource(target, done.videoUri)
             val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val encodedWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val encodedHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
             retriever.release()
+
             assertTrue("MP4 duration invalid: $duration", duration >= 3_500L)
-            assertEquals(720, width)
-            assertEquals(1280, height)
+            assertTrue("Unexpected video rotation metadata: $rotation", rotation in setOf(0, 90, 180, 270))
+            val displayWidth = if (rotation == 90 || rotation == 270) encodedHeight else encodedWidth
+            val displayHeight = if (rotation == 90 || rotation == 270) encodedWidth else encodedHeight
+            assertEquals("Final display width must be portrait 720", 720, displayWidth)
+            assertEquals("Final display height must be portrait 1280", 1280, displayHeight)
+            assertTrue("Final video must be portrait, encoded=${encodedWidth}x${encodedHeight} rotation=$rotation", displayHeight > displayWidth)
         }
     }
 
