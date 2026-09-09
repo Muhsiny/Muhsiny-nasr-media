@@ -181,14 +181,7 @@ jobs:
             mkdir -p open-studio-worker/workflows
             echo '{}' > open-studio-worker/workflows/image.json
             echo '{}' > open-studio-worker/workflows/video.json
-            cat >/tmp/fake-whisper <<'PY'
-            #!/usr/bin/env python3
-            import sys
-            args=sys.argv
-            out=args[args.index('-of')+1]
-            with open(out + '.txt','w',encoding='utf-8') as f:
-                f.write('رونویسی آزمایشی فارسی برای تست V7')
-            PY
+            printf '%s\n' '#!/usr/bin/env python3' 'import sys' 'args=sys.argv' "out=args[args.index('-of')+1]" "with open(out + '.txt','w',encoding='utf-8') as f:" "    f.write('رونویسی آزمایشی فارسی برای تست V7')" >/tmp/fake-whisper
             chmod +x /tmp/fake-whisper
             printf 'ci-model' >/tmp/whisper-model.bin
             python open-studio-worker/ci_stub_dependencies.py >/tmp/docstudio-stubs-android.log 2>&1 &
