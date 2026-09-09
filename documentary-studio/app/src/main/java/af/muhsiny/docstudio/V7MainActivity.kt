@@ -17,6 +17,10 @@ import java.io.File
 import java.util.concurrent.Executors
 
 class V7MainActivity : Activity() {
+    companion object {
+        private const val REQUEST_TRANSCRIBE = 701
+    }
+
     private lateinit var repo: ProjectRepository
     private lateinit var project: DocumentaryProject
     private lateinit var serverInput: EditText
@@ -28,6 +32,7 @@ class V7MainActivity : Activity() {
     private lateinit var applyPlanButton: Button
     private lateinit var imageButton: Button
     private lateinit var videoButton: Button
+    private lateinit var transcribeButton: Button
     private var capabilities: OpenCapabilities? = null
     private val executor = Executors.newSingleThreadExecutor()
     private val prefs by lazy { getSharedPreferences("open_studio_v7", MODE_PRIVATE) }
@@ -62,6 +67,44 @@ class V7MainActivity : Activity() {
         super.onDestroy()
     }
 
+    @Deprecated("Legacy activity result kept for Android 8+ compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_TRANSCRIBE || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return setStatus("فایل برای رونویسی انتخاب نشد")
+        runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        saveConnection()
+        transcribeButton.enable(false)
+        setStatus("Whisper در حال رونویسی صوت/ویدیو…")
+        executor.execute {
+            runCatching { client().transcribe(this, uri) }
+                .onSuccess { transcript ->
+                    project = repo.currentOrCreate().also { it.ensureScenes() }
+                    val oldScript = project.script.trim()
+                    project.script = if (oldScript.isBlank()) transcript else "$oldScript\n\n$transcript"
+                    val newScenes = ScenePlanner.scenes(transcript, 80)
+                    if (newScenes.isEmpty()) {
+                        project.scenes.add(SceneItem(text = transcript, subtitle = true))
+                    } else {
+                        newScenes.forEach { project.scenes.add(SceneItem(text = it.text, subtitle = true)) }
+                    }
+                    repo.save(project)
+                    runOnUiThread {
+                        transcribeButton.enable(capabilities?.transcribe == true)
+                        setStatus("رونویسی کامل شد؛ ${newScenes.size.coerceAtLeast(1)} صحنه به پروژه افزوده شد ✓")
+                    }
+                }
+                .onFailure { e ->
+                    runOnUiThread {
+                        transcribeButton.enable(capabilities?.transcribe == true)
+                        setStatus("رونویسی متوقف شد: ${e.message}")
+                    }
+                }
+        }
+    }
+
     private fun buildUi(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -86,6 +129,11 @@ class V7MainActivity : Activity() {
         root.addView(button("بررسی و شناسایی قابلیت‌های واقعی") { checkCapabilities() })
         capabilityText = text("هنوز بررسی نشده", 12, false, Color.rgb(231, 196, 113))
         root.addView(capabilityText)
+
+        root.addView(section("رونویسی آفلاین"))
+        root.addView(text("اگر Whisper.cpp روی موتور محلی نصب باشد، صوت یا ویدیو بدون سرویس پولی رونویسی و مستقیم به سناریو و تایم‌لاین افزوده می‌شود.", 12, false, Color.LTGRAY))
+        transcribeButton = button("رونویسی صوت/ویدیو و افزودن به پروژه") { startTranscriptionPicker() }.apply { isEnabled = false; alpha = .45f }
+        root.addView(transcribeButton)
 
         root.addView(section("کارگردان هوشمند محلی"))
         root.addView(text("سناریوی پروژه را به پلان صحنه‌ای تبدیل می‌کند؛ برای ادعاهای تاریخی، صحنهٔ آرشیوی را از بازسازی مولد جدا نگه می‌دارد.", 12, false, Color.LTGRAY))
@@ -112,6 +160,16 @@ class V7MainActivity : Activity() {
         return scroll
     }
 
+    private fun startTranscriptionPicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQUEST_TRANSCRIBE)
+    }
+
     private fun checkCapabilities() {
         saveConnection()
         setStatus("در حال بررسی موتور آزاد…")
@@ -126,15 +184,24 @@ class V7MainActivity : Activity() {
                             append(" · تصویر: ").append(if (caps.image) "✓" else "✗")
                             append(" · ویدیو: ").append(if (caps.video) "✓" else "✗")
                             append(" · Whisper: ").append(if (caps.transcribe) "✓" else "✗")
-                            append(" · Upscale: ").append(if (caps.upscale) "✓" else "✗")
                         }
                         directorButton.enable(caps.directorAi)
                         imageButton.enable(caps.image)
                         videoButton.enable(caps.video)
+                        transcribeButton.enable(caps.transcribe)
                         setStatus("شناسایی قابلیت‌ها تمام شد")
                     }
                 }
-                .onFailure { e -> runOnUiThread { capabilityText.text = "اتصال ناموفق: ${e.message}"; setStatus("موتور آزاد در دسترس نیست") } }
+                .onFailure { e ->
+                    runOnUiThread {
+                        directorButton.enable(false)
+                        imageButton.enable(false)
+                        videoButton.enable(false)
+                        transcribeButton.enable(false)
+                        capabilityText.text = "اتصال ناموفق: ${e.message}"
+                        setStatus("موتور آزاد در دسترس نیست")
+                    }
+                }
         }
     }
 
