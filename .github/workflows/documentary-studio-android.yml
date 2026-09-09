@@ -1,18 +1,19 @@
-name: Build Documentary Studio V6 PRO
+name: Build Documentary Studio V7 OPEN AI
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - feature/documentary-studio-v6-pro
+      - feature/documentary-studio-v7-open-ai
     paths:
       - 'documentary-studio/**'
+      - 'open-studio-worker/**'
       - '.github/workflows/documentary-studio-android.yml'
 
 jobs:
   build-test-real:
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +27,32 @@ jobs:
       - name: Install Android SDK NDK and CMake
         run: |
           yes | sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Validate open local worker and capability contract
+        run: |
+          set -euxo pipefail
+          python -m py_compile open-studio-worker/server.py open-studio-worker/ci_stub_dependencies.py
+          mkdir -p open-studio-worker/workflows
+          echo '{}' > open-studio-worker/workflows/image.json
+          echo '{}' > open-studio-worker/workflows/video.json
+          python open-studio-worker/ci_stub_dependencies.py >/tmp/docstudio-stubs.log 2>&1 &
+          STUB_PID=$!
+          DOCSTUDIO_IMAGE_WORKFLOW="$PWD/open-studio-worker/workflows/image.json" \
+          DOCSTUDIO_VIDEO_WORKFLOW="$PWD/open-studio-worker/workflows/video.json" \
+          python open-studio-worker/server.py --host 127.0.0.1 --port 8190 --token ci-token >/tmp/docstudio-worker.log 2>&1 &
+          WORKER_PID=$!
+          sleep 2
+          curl -fsS http://127.0.0.1:8190/v1/ping | grep -q 'DocStudio Open Worker'
+          curl -fsS -H 'Authorization: Bearer ci-token' http://127.0.0.1:8190/v1/capabilities | tee /tmp/caps.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/caps.json'))
+          assert x['director_ai'] is True
+          assert x['image'] is True
+          assert x['video'] is True
+          assert 'ollama' in x['engines'] and 'comfyui' in x['engines']
+          PY
+          kill "$WORKER_PID" "$STUB_PID" || true
 
       - uses: actions/download-artifact@v4
         with:
@@ -84,15 +111,15 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Run V6 unit tests
+      - name: Run V7 unit tests
         working-directory: documentary-studio
         run: gradle :app:testDebugUnitTest --stacktrace
 
-      - name: Build V6 APK with bundled Persian model
+      - name: Build V7 APK with bundled Persian model
         working-directory: documentary-studio
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Audit real V6 APK before device test
+      - name: Audit real V7 APK before device test
         run: |
           set -euxo pipefail
           APK=documentary-studio/app/build/outputs/apk/debug/app-debug.apk
@@ -103,7 +130,8 @@ jobs:
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libonnxruntime.so'
           unzip -l "$APK" | grep -q 'assets/pockettts_fa/model/flow_lm_main_int8.onnx'
           unzip -l "$APK" | grep -q 'assets/pockettts_fa/voices/example_voice.wav'
-          unzip -l "$APK" | grep -q 'classes.dex'
+          aapt dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          aapt dump xmltree "$APK" AndroidManifest.xml | grep -q 'V7MainActivity'
           ls -lh "$APK"
           sha256sum "$APK"
 
@@ -113,7 +141,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
-      - name: Android 15 professional UI + timeline render + Persian on-device tests
+      - name: Android 15 V6 render + Persian on-device + V7 open-AI integration tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -121,12 +149,21 @@ jobs:
           target: default
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -partition-size 4096
           disable-animations: true
-          script: cd documentary-studio && gradle :app:connectedDebugAndroidTest --stacktrace
+          script: |
+            mkdir -p open-studio-worker/workflows
+            echo '{}' > open-studio-worker/workflows/image.json
+            echo '{}' > open-studio-worker/workflows/video.json
+            python open-studio-worker/ci_stub_dependencies.py >/tmp/docstudio-stubs-android.log 2>&1 &
+            DOCSTUDIO_IMAGE_WORKFLOW="$PWD/open-studio-worker/workflows/image.json" DOCSTUDIO_VIDEO_WORKFLOW="$PWD/open-studio-worker/workflows/video.json" python open-studio-worker/server.py --host 0.0.0.0 --port 8190 --token ci-token >/tmp/docstudio-worker-android.log 2>&1 &
+            sleep 2
+            curl -fsS -H 'Authorization: Bearer ci-token' http://127.0.0.1:8190/v1/capabilities
+            cd documentary-studio
+            gradle :app:connectedDebugAndroidTest --stacktrace
 
-      - name: Upload only after every V6 test passes
+      - name: Upload only after every V7 test passes
         uses: actions/upload-artifact@v4
         with:
-          name: Documentary-Studio-V6-PRO-FINAL-TESTED
+          name: Documentary-Studio-V7-OPEN-AI-FINAL-TESTED
           path: documentary-studio/app/build/outputs/apk/debug/app-debug.apk
           compression-level: 0
           retention-days: 30
