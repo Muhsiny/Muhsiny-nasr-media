@@ -123,6 +123,8 @@ jobs:
         run: |
           set -euxo pipefail
           APK=documentary-studio/app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          test -x "$AAPT"
           test -s "$APK"
           test "$(stat -c%s "$APK")" -gt 150000000
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libpockettts_jni.so'
@@ -130,8 +132,8 @@ jobs:
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libonnxruntime.so'
           unzip -l "$APK" | grep -q 'assets/pockettts_fa/model/flow_lm_main_int8.onnx'
           unzip -l "$APK" | grep -q 'assets/pockettts_fa/voices/example_voice.wav'
-          aapt dump permissions "$APK" | grep -q 'android.permission.INTERNET'
-          aapt dump xmltree "$APK" AndroidManifest.xml | grep -q 'V7MainActivity'
+          "$AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml | grep -q 'V7MainActivity'
           ls -lh "$APK"
           sha256sum "$APK"
 
