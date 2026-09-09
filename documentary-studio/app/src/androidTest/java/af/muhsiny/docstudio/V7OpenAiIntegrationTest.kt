@@ -19,7 +19,7 @@ import java.io.File
 @RunWith(AndroidJUnit4::class)
 class V7OpenAiIntegrationTest {
     @Test
-    fun localOpenAiDirectorAndGeneratedAssetFlowIntoRealProject() {
+    fun localOpenAiDirectorWhisperAndGeneratedAssetFlowIntoRealProject() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val repo = ProjectRepository(context)
         val project = repo.currentOrCreate().apply {
@@ -39,9 +39,25 @@ class V7OpenAiIntegrationTest {
                 val root = activity.window.decorView
                 assertNotNull(findButton(root, "بازکردن استدیوی تدوین V6"))
                 assertNotNull(findButton(root, "بررسی و شناسایی قابلیت‌های واقعی"))
+                assertNotNull(findButton(root, "رونویسی صوت/ویدیو و افزودن به پروژه"))
                 findButton(root, "بررسی و شناسایی قابلیت‌های واقعی")!!.performClick()
             }
             assertTrue("Capabilities did not load", waitForText(scenario, "کارگردان AI: ✓", 15_000))
+            assertTrue("Whisper capability did not load", waitForText(scenario, "Whisper: ✓", 15_000))
+
+            scenario.onActivity { activity ->
+                val transcribe = findButton(activity.window.decorView, "رونویسی صوت/ویدیو و افزودن به پروژه")
+                assertNotNull(transcribe)
+                assertTrue("Whisper button must only enable after real capability detection", transcribe!!.isEnabled)
+            }
+
+            val sample = File(context.cacheDir, "ci_transcribe.wav").apply {
+                writeBytes(ByteArray(4096) { ((it * 31) and 0xff).toByte() })
+            }
+            val transcript = OpenStudioClient("http://10.0.2.2:8190", "ci-token")
+                .transcribe(context, Uri.fromFile(sample))
+            assertTrue("Whisper protocol did not return the expected Persian text", transcript.contains("رونویسی آزمایشی"))
+            sample.delete()
 
             scenario.onActivity { activity ->
                 val director = findButton(activity.window.decorView, "ساخت پلان هوشمند از سناریو")
