@@ -115,6 +115,7 @@ class OpenStudioClient(baseUrl: String, private val token: String) {
         val dir = File(context.filesDir, "open_assets").apply { mkdirs() }
         val target = File(dir, "${prefix}_${System.currentTimeMillis()}.$ext")
         try {
+            ensureSuccess(connection)
             connection.inputStream.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
         } finally {
             connection.disconnect()
@@ -123,22 +124,65 @@ class OpenStudioClient(baseUrl: String, private val token: String) {
         return Uri.fromFile(target)
     }
 
+    fun transcribe(context: Context, uri: Uri): String {
+        val suffix = runCatching {
+            val path = uri.lastPathSegment.orEmpty()
+            val ext = path.substringAfterLast('.', "media").lowercase().filter { it.isLetterOrDigit() }.take(8)
+            if (ext.isBlank()) ".media" else ".$ext"
+        }.getOrDefault(".media")
+        val temp = File.createTempFile("docstudio_transcribe_", suffix, context.cacheDir)
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                temp.outputStream().use { output -> input.copyTo(output) }
+            } ?: error("فایل صوت/ویدیو باز نشد")
+            val size = temp.length()
+            if (size <= 0L) error("فایل صوت/ویدیو خالی است")
+            if (size > 512L * 1024L * 1024L) error("فایل برای رونویسی بیش از ۵۱۲ مگابایت است")
+
+            val c = open("POST", "/v1/transcribe", "application/octet-stream")
+            c.readTimeout = 30 * 60 * 1000
+            c.setRequestProperty("X-Filename", "upload$suffix")
+            c.setFixedLengthStreamingMode(size)
+            try {
+                c.outputStream.use { output -> temp.inputStream().use { input -> input.copyTo(output) } }
+                val json = readJsonResponse(c)
+                return json.optString("text").trim().takeIf { it.isNotBlank() } ?: error("رونویسی خالی برگشت")
+            } finally {
+                c.disconnect()
+            }
+        } finally {
+            temp.delete()
+        }
+    }
+
     private fun requestJson(method: String, path: String, body: JSONObject? = null): JSONObject {
         val c = open(method, path)
         try {
             if (body != null) c.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
-            val code = c.responseCode
-            val bytes = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes() } ?: ByteArray(0)
-            val text = bytes.toString(StandardCharsets.UTF_8)
-            val json = runCatching { JSONObject(text) }.getOrElse { JSONObject().put("error", text) }
-            if (code !in 200..299) error(json.optString("error", "HTTP $code"))
-            return json
+            return readJsonResponse(c)
         } finally {
             c.disconnect()
         }
     }
 
-    private fun open(method: String, path: String): HttpURLConnection {
+    private fun readJsonResponse(c: HttpURLConnection): JSONObject {
+        val code = c.responseCode
+        val bytes = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes() } ?: ByteArray(0)
+        val text = bytes.toString(StandardCharsets.UTF_8)
+        val json = runCatching { JSONObject(text) }.getOrElse { JSONObject().put("error", text) }
+        if (code !in 200..299) error(json.optString("error", "HTTP $code"))
+        return json
+    }
+
+    private fun ensureSuccess(c: HttpURLConnection) {
+        val code = c.responseCode
+        if (code in 200..299) return
+        val text = c.errorStream?.use { it.readBytes().toString(StandardCharsets.UTF_8) }.orEmpty()
+        val message = runCatching { JSONObject(text).optString("error") }.getOrNull().orEmpty().ifBlank { "HTTP $code" }
+        error(message)
+    }
+
+    private fun open(method: String, path: String, contentType: String = "application/json; charset=utf-8"): HttpURLConnection {
         val c = URL(base + path).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.connectTimeout = 6_000
@@ -147,7 +191,7 @@ class OpenStudioClient(baseUrl: String, private val token: String) {
         c.setRequestProperty("Accept", "application/json")
         if (method == "POST") {
             c.doOutput = true
-            c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            c.setRequestProperty("Content-Type", contentType)
         }
         return c
     }
