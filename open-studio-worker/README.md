@@ -1,14 +1,15 @@
 # Documentary Studio V7 Open Worker
 
-A zero-subscription local compute bridge for Documentary Studio. The Android app keeps editing, Persian narration and final Media3 rendering on-device; this worker exposes only locally available heavy AI engines.
+A zero-subscription local compute bridge for Documentary Studio V7. The Android app keeps project editing, Persian narration and final Media3 rendering on-device; this worker exposes only heavy AI engines that are actually available on a local computer or a trusted community machine.
 
 ## Principles
 
 - No proprietary paywall bypassing.
 - No mandatory cloud account, API key or credits.
-- Capability truth: a feature is advertised only after its local engine and required workflow are detected.
-- Historical integrity: AI Director distinguishes `archive` from `generated`; the Android app never silently replaces an archive scene with generated media.
+- Capability truth: a feature is advertised only after its local engine is detected **and** the V7 protocol has a usable action for it.
+- Historical integrity: AI Director distinguishes `archive` from `generated`; Android never silently replaces an archive scene with generated media.
 - Token authentication is mandatory for all private endpoints.
+- Temporary transcription uploads are removed after processing.
 
 ## Start
 
@@ -22,7 +23,7 @@ The first run creates `.state/token.txt` and prints the token. Enter the machine
 
 ### AI Director
 
-Run an Ollama-compatible local server on `127.0.0.1:11434`. The worker discovers installed models automatically and prefers Qwen/Llama/Gemma/Mistral names. No AI Director button is enabled in Android if no model is detected.
+Run an Ollama-compatible local server on `127.0.0.1:11434`. The worker discovers installed models automatically and prefers Qwen/Llama/Gemma/Mistral names. No AI Director button is enabled in Android if no local model is detected.
 
 ### Image / video generation
 
@@ -30,9 +31,8 @@ Run ComfyUI on `127.0.0.1:8188`. Export API-format workflows and save them as:
 
 - `workflows/image.json`
 - `workflows/video.json`
-- optional `workflows/upscale.json`
 
-Or set `DOCSTUDIO_IMAGE_WORKFLOW`, `DOCSTUDIO_VIDEO_WORKFLOW`, or `DOCSTUDIO_UPSCALE_WORKFLOW` to absolute paths.
+Or set `DOCSTUDIO_IMAGE_WORKFLOW` and `DOCSTUDIO_VIDEO_WORKFLOW` to absolute paths.
 
 Workflow JSON may contain these placeholders:
 
@@ -43,9 +43,9 @@ Workflow JSON may contain these placeholders:
 - `{{SECONDS}}`
 - `{{SEED}}`
 
-This keeps the Android app independent of any single image/video model. A community computer can use Wan, LTX, Hunyuan, Flux, Qwen Image, or another ComfyUI-compatible open workflow without changing the APK.
+This keeps Android independent of any single image/video model. A community computer can use any suitably licensed ComfyUI-compatible workflow without changing the APK.
 
-### Whisper.cpp
+### Whisper.cpp transcription
 
 Set:
 
@@ -54,12 +54,35 @@ DOCSTUDIO_WHISPER_BIN=/path/to/whisper-cli
 DOCSTUDIO_WHISPER_MODEL=/path/to/model.gguf
 ```
 
-The current protocol reports Whisper availability; file-upload transcription UI is intentionally not exposed in V7 until its Android end-to-end path is implemented and tested.
+Optional language override:
+
+```text
+DOCSTUDIO_WHISPER_LANGUAGE=fa
+```
+
+When both executable and model are present, V7 enables **رونویسی صوت/ویدیو و افزودن به پروژه**. Android copies the selected file to a temporary local upload, streams it to `/v1/transcribe`, the worker invokes whisper.cpp, returns UTF-8 text, and removes temporary worker files. The transcript is appended to the active project and split into real subtitle-enabled scenes.
+
+Maximum upload defaults to 512 MiB and can be changed with `DOCSTUDIO_MAX_UPLOAD_BYTES`. Transcription timeout defaults to 1800 seconds and can be changed with `DOCSTUDIO_TRANSCRIBE_TIMEOUT`.
+
+### Upscale
+
+Upscale is deliberately reported as unavailable in protocol 1 until a complete upload → workflow → returned-asset path and Android UI action are implemented and tested. V7 never advertises this as working merely because a ComfyUI workflow file exists.
 
 ## Security
 
-The Android client permits cleartext HTTP only for private/loopback LAN addresses in application code. Public HTTP endpoints are rejected. HTTPS is supported. All capability, planning, generation, job and file-proxy endpoints require `Authorization: Bearer <token>`.
+The Android client permits cleartext HTTP only for private/loopback LAN addresses in application code. Public HTTP endpoints are rejected. HTTPS is supported. All capability, planning, transcription, generation, job and file-proxy endpoints require `Authorization: Bearer <token>`.
 
 ## CI contract
 
-CI starts fake Ollama/ComfyUI dependencies but the real `server.py`. Android emulator connects through `10.0.2.2`, requests real capabilities and a real plan from the protocol, generates a test asset, downloads it, and inserts it into a real DocumentaryProject. The archive scene must remain unmodified or the test fails.
+CI runs the real worker and real Android client against deterministic local stand-ins for external model engines. It verifies:
+
+- capability detection and token-protected protocol;
+- binary transcription upload and returned Persian text;
+- AI Director plan flow;
+- generated asset download into a real DocumentaryProject;
+- archive scenes remain unmodified;
+- bundled on-device Persian PocketTTS runtime/model assets;
+- real Android Media3 export tests;
+- Android API 35 instrumentation before the APK artifact is published.
+
+Model quality is not faked by these deterministic CI stand-ins: on a real installation, AI and transcription quality depend on the open models and hardware the user installs on the local worker.
