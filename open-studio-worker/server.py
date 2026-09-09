@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, json, os, secrets, shutil, threading, time, uuid
+import argparse, json, os, secrets, shutil, subprocess, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import request, parse
@@ -7,6 +7,8 @@ from urllib import request, parse
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / '.state'
 STATE.mkdir(exist_ok=True)
+UPLOADS = STATE / 'uploads'
+UPLOADS.mkdir(exist_ok=True)
 JOBS = {}
 LOCK = threading.Lock()
 
@@ -49,10 +51,20 @@ def ollama_models():
         return []
 
 
-def whisper_ready():
-    exe = os.getenv('DOCSTUDIO_WHISPER_BIN') or shutil.which('whisper-cli') or shutil.which('main')
+def whisper_config():
+    exe = os.getenv('DOCSTUDIO_WHISPER_BIN') or shutil.which('whisper-cli')
     model = os.getenv('DOCSTUDIO_WHISPER_MODEL')
-    return bool(exe and model and Path(model).exists())
+    if not exe or not model:
+        return None
+    exe_path = Path(exe)
+    model_path = Path(model)
+    if not exe_path.exists() or not model_path.exists():
+        return None
+    return str(exe_path), str(model_path)
+
+
+def whisper_ready():
+    return whisper_config() is not None
 
 
 def capabilities():
@@ -60,18 +72,20 @@ def capabilities():
     models = ollama_models()
     image = comfy and _workflow_path('image').exists()
     video = comfy and _workflow_path('video').exists()
+    whisper = whisper_ready()
     return {
         'protocol': 1,
         'director_ai': bool(models),
         'director_model': models[0] if models else None,
-        'transcribe': whisper_ready(),
+        'transcribe': whisper,
         'image': image,
         'video': video,
-        'upscale': comfy and _workflow_path('upscale').exists(),
+        # Do not advertise a capability until both protocol endpoint and app action exist.
+        'upscale': False,
         'engines': [x for x, ok in [
-            ('ollama', bool(models)), ('comfyui', comfy), ('whisper.cpp', whisper_ready()), ('ffmpeg', bool(shutil.which('ffmpeg')))
+            ('ollama', bool(models)), ('comfyui', comfy), ('whisper.cpp', whisper), ('ffmpeg', bool(shutil.which('ffmpeg')))
         ] if ok],
-        'message': 'Only capabilities that passed local detection are enabled.'
+        'message': 'Only capabilities that passed local detection and have a usable protocol action are enabled.'
     }
 
 
@@ -150,6 +164,37 @@ def comfy_generate(kind, params):
     raise TimeoutError('Generation timed out')
 
 
+def transcribe_file(media_path):
+    config = whisper_config()
+    if not config:
+        raise RuntimeError('whisper.cpp is not configured.')
+    exe, model = config
+    out_base = UPLOADS / ('transcript_' + uuid.uuid4().hex)
+    command = [exe, '-m', model, '-f', str(media_path), '-otxt', '-of', str(out_base)]
+    language = os.getenv('DOCSTUDIO_WHISPER_LANGUAGE', '').strip()
+    if language:
+        command += ['-l', language]
+    timeout = int(os.getenv('DOCSTUDIO_TRANSCRIBE_TIMEOUT', '1800'))
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=False)
+    text_file = Path(str(out_base) + '.txt')
+    try:
+        if result.returncode != 0:
+            detail = result.stderr.decode('utf-8', errors='replace')[-1200:]
+            raise RuntimeError('whisper.cpp failed: ' + detail)
+        if not text_file.exists():
+            raise RuntimeError('whisper.cpp did not produce a transcript file.')
+        text = text_file.read_text('utf-8', errors='replace').strip()
+        if not text:
+            raise RuntimeError('Transcript is empty.')
+        return text
+    finally:
+        for candidate in UPLOADS.glob(out_base.name + '.*'):
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+
+
 def new_job(kind, params):
     jid = uuid.uuid4().hex
     with LOCK:
@@ -184,7 +229,7 @@ def token_value(explicit=None):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'DocStudioOpen/1.0'
+    server_version = 'DocStudioOpen/1.1'
 
     def log_message(self, fmt, *args):
         print('[worker]', fmt % args)
@@ -204,6 +249,31 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get('Content-Length', '0'))
         raw = self.rfile.read(n) if n else b'{}'
         return json.loads(raw.decode('utf-8'))
+
+    def _receive_media(self):
+        try:
+            n = int(self.headers.get('Content-Length', '0'))
+        except ValueError:
+            raise ValueError('invalid Content-Length')
+        max_bytes = int(os.getenv('DOCSTUDIO_MAX_UPLOAD_BYTES', str(512 * 1024 * 1024)))
+        if n <= 0:
+            raise ValueError('empty media upload')
+        if n > max_bytes:
+            raise ValueError('media upload exceeds configured limit')
+        raw_name = self.headers.get('X-Filename', 'upload.media')
+        suffix = Path(raw_name).suffix.lower()
+        if not suffix or len(suffix) > 10 or not suffix[1:].isalnum():
+            suffix = '.media'
+        target = UPLOADS / ('upload_' + uuid.uuid4().hex + suffix)
+        remaining = n
+        with target.open('wb') as out:
+            while remaining:
+                chunk = self.rfile.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    raise ValueError('upload ended early')
+                out.write(chunk)
+                remaining -= len(chunk)
+        return target
 
     def do_GET(self):
         if self.path == '/v1/ping':
@@ -235,6 +305,26 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._auth():
             return self._send(401, {'error': 'unauthorized'})
+        if self.path == '/v1/transcribe':
+            if not whisper_ready():
+                return self._send(503, {'error': 'whisper.cpp is not ready'})
+            media = None
+            try:
+                media = self._receive_media()
+                text = transcribe_file(media)
+                return self._send(200, {'text': text, 'engine': 'whisper.cpp'})
+            except ValueError as e:
+                return self._send(400, {'error': str(e)})
+            except subprocess.TimeoutExpired:
+                return self._send(504, {'error': 'transcription timed out'})
+            except Exception as e:
+                return self._send(500, {'error': str(e)})
+            finally:
+                if media is not None:
+                    try:
+                        media.unlink()
+                    except OSError:
+                        pass
         try:
             body = self._body()
         except Exception as e:
