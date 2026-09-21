@@ -57,23 +57,19 @@ jobs:
           # Router engine: restore a saved policy/ACL through the same verified transaction.
           p=root/'app/src/main/java/org/sayeh/wificontrol/core/TpLinkCliRouter.java'
           s=p.read_text(encoding='utf-8')
-          needle='''    @Override public synchronized ActionResult disableFilter(String rawManagerMac) throws IOException {
-              RouterSnapshot before = probe();
-              return applyTransaction(RouterSnapshot.POLICY_OFF, new LinkedHashSet<>(), MacAddress.normalize(rawManagerMac), before,
-                      "MAC filter disabled and verified by router.");
-          }
-          '''
-          replacement=needle+'''
-          @Override public synchronized ActionResult restoreState(int policy, Set<String> acl, String rawManagerMac) throws IOException {
+          if 'ActionResult restoreState(' not in s:
+              marker='    private ActionResult applyTransaction('
+              if marker not in s: raise SystemExit('TpLink applyTransaction anchor missing')
+              restore='''    @Override public synchronized ActionResult restoreState(int policy, Set<String> acl, String rawManagerMac) throws IOException {
               if (policy < RouterSnapshot.POLICY_OFF || policy > RouterSnapshot.POLICY_ALLOW)
                   return ActionResult.fail("Invalid backup policy.", null, null);
               RouterSnapshot before = probe();
               return applyTransaction(policy, cleanSet(acl), MacAddress.normalize(rawManagerMac), before,
                       "Saved safe state restored and verified by router.");
           }
+
           '''
-          if needle not in s: raise SystemExit('TpLink restore patch anchor missing')
-          s=s.replace(needle,replacement)
+              s=s.replace(marker,restore+marker,1)
           p.write_text(s,encoding='utf-8')
 
           # MainActivity V8 UI and direct-router tools.
