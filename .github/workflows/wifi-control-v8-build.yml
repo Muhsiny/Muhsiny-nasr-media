@@ -38,6 +38,11 @@ jobs:
           unzip -q /tmp/WiFiControlV8_min.zip -d /tmp/v8
           test -f /tmp/v8/WiFiControlV6/app/build.gradle
 
+      - name: Inspect current V8 MainActivity
+        shell: bash
+        run: |
+          sed -n '1,420p' /tmp/v8/WiFiControlV6/app/src/main/java/org/sayeh/wificontrol/MainActivity.java
+
       - name: Source feature and safety gate
         shell: bash
         run: |
