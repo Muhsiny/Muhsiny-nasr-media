@@ -265,7 +265,7 @@ jobs:
           s=p.read_text(encoding='utf-8')
           s=s.replace('WiFi Control V7 Pro','WiFi Control V7.2 Safe Control')
           s=s.replace('کنترل واقعی Router با Verify و محافظت در برابر قفل‌شدن مدیر',
-                      'کنترل محدود و امن‌تر: فقط Block/Unblock، بدون Reset/Reboot/Persistent Save')
+                      'کنترل محدود و امن‌تر: فقط Block/Unblock با Verify و Rollback')
           s=s.replace('nodeInput=input("WLAN node",String.valueOf(prefs.getInt("wlan_node",0)),InputType.TYPE_CLASS_NUMBER);',
                       'nodeInput=input("WLAN node (قفل ایمنی)","1",InputType.TYPE_CLASS_NUMBER); nodeInput.setEnabled(false);')
           s=s.replace('int parsedNode;\n        try { parsedNode=Integer.parseInt(nodeInput.getText().toString().trim()); }\n        catch(Exception e) { statusText.setText("WLAN node نامعتبر است."); return; }\n        final int node=parsedNode;\n        prefs.edit().putString("router_host",host).putInt("wlan_node",node).apply();',
