@@ -16,7 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-public final class RouterWebConsoleActivity extends Activity {
+// V8 build trigger: router-direct final\npublic final class RouterWebConsoleActivity extends Activity {
     private WebView web;
     private String host, targetIp, targetMac;
 
