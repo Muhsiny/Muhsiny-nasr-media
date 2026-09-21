@@ -1,0 +1,263 @@
+--- a/app/src/main/java/org/sayeh/wificontrol/MainActivity.java
++++ b/app/src/main/java/org/sayeh/wificontrol/MainActivity.java
+@@ -3,6 +3,7 @@
+ import android.app.Activity;
+ import android.app.AlertDialog;
+ import android.content.SharedPreferences;
++import android.content.Intent;
+ import android.graphics.Color;
+ import android.graphics.Typeface;
+ import android.os.Bundle;
+@@ -29,6 +30,8 @@
+ import java.net.Inet4Address;
+ import java.net.InetAddress;
+ import java.net.NetworkInterface;
++import java.net.InetSocketAddress;
++import java.net.Socket;
+ import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.Comparator;
+@@ -50,7 +53,7 @@
+     private EditText hostInput,passwordInput,nodeInput;
+     private TextView statusText,managerText,diagnosticText;
+     private LinearLayout devicesContainer;
+-    private Button connectButton,refreshButton,allowOnlyButton,emergencyButton,quarantineButton,monitorButton,historyButton;
++    private Button connectButton,refreshButton,allowOnlyButton,emergencyButton,quarantineButton,monitorButton,historyButton,advancedButton,diagButton,backupButton,restoreButton;
+     private TpLinkCliRouter router;
+     private RouterSnapshot snapshot;
+     private String managerMac="";
+@@ -67,13 +70,13 @@
+     private void buildUi() {
+         ScrollView scroll=new ScrollView(this);
+         LinearLayout root=vertical(); root.setPadding(dp(16),dp(16),dp(16),dp(28)); scroll.addView(root);
+-        TextView title=text("WiFi Control V7 Pro",26,true); title.setGravity(Gravity.CENTER_HORIZONTAL); root.addView(title);
+-        TextView subtitle=text("کنترل واقعی Router با Verify و محافظت در برابر قفل‌شدن مدیر",13,false);
++        TextView title=text("WiFi Control V8 Router Manager",26,true); title.setGravity(Gravity.CENTER_HORIZONTAL); root.addView(title);
++        TextView subtitle=text("مستقل از کمپیوتر و کلاد • کنترل مستقیم روتر • Verify / Rollback / QoS Console",13,false);
+         subtitle.setGravity(Gravity.CENTER_HORIZONTAL); subtitle.setTextColor(Color.DKGRAY); root.addView(subtitle);
+ 
+         hostInput=input("آدرس روتر",prefs.getString("router_host","192.168.1.1"),InputType.TYPE_CLASS_TEXT);
+         passwordInput=input("رمز Telnet روتر","",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
+-        nodeInput=input("WLAN node",String.valueOf(prefs.getInt("wlan_node",0)),InputType.TYPE_CLASS_NUMBER);
++        nodeInput=input("WLAN node",String.valueOf(prefs.getInt("wlan_node",1)),InputType.TYPE_CLASS_NUMBER);
+         root.addView(hostInput); root.addView(passwordInput); root.addView(nodeInput);
+ 
+         LinearLayout row=horizontal();
+@@ -86,6 +89,10 @@
+         quarantineButton=button("قرنطینه ناشناس‌ها"); monitorButton=button("مانیتور زنده: خاموش");
+         security.addView(quarantineButton,weighted()); security.addView(monitorButton,weighted()); root.addView(security);
+         historyButton=button("تاریخچه عملیات"); root.addView(historyButton);
++        LinearLayout tools=horizontal(); advancedButton=button("QoS / کنسول پیشرفته"); diagButton=button("تشخیص شبکه");
++        tools.addView(advancedButton,weighted()); tools.addView(diagButton,weighted()); root.addView(tools);
++        LinearLayout safety=horizontal(); backupButton=button("Backup وضعیت امن"); restoreButton=button("Restore وضعیت امن");
++        safety.addView(backupButton,weighted()); safety.addView(restoreButton,weighted()); root.addView(safety);
+ 
+         statusText=text("آماده برای اتصال",14,true); statusText.setPadding(0,dp(12),0,dp(6)); root.addView(statusText);
+         managerText=text(managerMac.isEmpty()?"دستگاه مدیر: مشخص نشده":"دستگاه مدیر: "+managerMac,13,false); root.addView(managerText);
+@@ -99,6 +106,10 @@
+         quarantineButton.setOnClickListener(v->confirmQuarantineUnknown());
+         monitorButton.setOnClickListener(v->toggleMonitor());
+         historyButton.setOnClickListener(v->showHistory());
++        advancedButton.setOnClickListener(v->openAdvanced("",""));
++        diagButton.setOnClickListener(v->runDiagnostics());
++        backupButton.setOnClickListener(v->saveCurrentBackup());
++        restoreButton.setOnClickListener(v->restoreBackup());
+         setContentView(scroll); enableControls(false);
+     }
+ 
+@@ -118,7 +129,7 @@
+                 next=new TpLinkCliRouter(new RouterProfile(host,23,node,password),TelnetSocketTransport::new);
+                 next.connect(); RouterSnapshot s=next.probe();
+                 TpLinkCliRouter old=router; router=next; next=null; if(old!=null) old.close();
+-                runOnUiThread(()->{ autoDetectManager(host,s); logEvent("CONNECT", "Router "+host+" connected"); consumeSnapshot(s,"اتصال و خواندن مستقیم Router موفق بود."); });
++                runOnUiThread(()->{ autoDetectManager(host,s); logEvent("CONNECT", "Router "+host+" connected"); consumeSnapshot(s,"اتصال مستقیم Router موفق بود و وضعیت واقعی خوانده شد."); });
+             } catch(Throwable e) {
+                 if(next!=null) next.close();
+                 runOnUiThread(()->fail("اتصال ناموفق: "+clean(e)));
+@@ -231,6 +242,7 @@
+     }
+ 
+     private void consume(ActionResult r) {
++        if(r.before!=null) saveBackup(r.before);
+         logEvent(r.success?"SUCCESS":"FAILED", r.message);
+         if(r.after!=null) snapshot=r.after;
+         statusText.setText(r.message+(r.rollbackAttempted?"\nRollback: "+(r.rollbackSucceeded?"موفق":"ناموفق"):""));
+@@ -243,7 +255,7 @@
+     private void render(RouterSnapshot s) {
+         devicesContainer.removeAllViews();
+         managerText.setText(managerMac.isEmpty()?"دستگاه مدیر: مشخص نشده — یکی را مدیر تعیین کنید.":"دستگاه مدیر (محافظت‌شده): "+aliasFor(managerMac)+"  "+managerMac);
+-        diagnosticText.setText("Policy: "+policyName(s.policy)+"   |   ACL: "+s.acl.size()+"   |   دستگاه‌های فعلی: "+s.devices.size());
++        diagnosticText.setText("Direct CLI: آماده  |  Policy: "+policyName(s.policy)+"  |  ACL: "+s.acl.size()+"  |  Online: "+s.devices.size()+"\nQoS/Queue: از کنسول واقعی روتر  |  Exact Mbps روی Firmware V4: پشتیبانی رسمی ندارد");
+         List<Device> list=new ArrayList<>(s.devices);
+         Collections.sort(list, Comparator.comparing((Device d)->!d.mac.equals(managerMac)).thenComparing(d->aliasFor(d.mac)));
+         if(list.isEmpty()) { devicesContainer.addView(text("هیچ دستگاه Wi-Fi از CLI گزارش نشد.",14,false)); return; }
+@@ -269,8 +281,43 @@
+         managerButton.setOnClickListener(v->{ setManager(d.mac); });
+         blockButton.setOnClickListener(v->runBlock(d,!blocked));
+         row.addView(managerButton,weighted()); row.addView(blockButton,weighted()); card.addView(row);
++        Button qosButton=button("QoS / Priority واقعی برای این IP");
++        qosButton.setEnabled(d.ip!=null&&!d.ip.trim().isEmpty()); qosButton.setOnClickListener(v->openAdvanced(d.ip,d.mac)); card.addView(qosButton);
+         return card;
+     }
++
++
++    private void openAdvanced(String ip,String mac){
++        Intent i=new Intent(this,RouterWebConsoleActivity.class); i.putExtra("host",hostInput.getText().toString().trim()); i.putExtra("ip",ip==null?"":ip); i.putExtra("mac",mac==null?"":mac); startActivity(i);
++    }
++
++    private void runDiagnostics(){
++        if(busy) return; final String host=hostInput.getText().toString().trim(); statusText.setText("در حال تست Gateway و پورت‌های مدیریت…");
++        executor.execute(()->{
++            StringBuilder b=new StringBuilder(); b.append("Router: ").append(host).append('\n');
++            b.append(testPort(host,23,"Telnet")); b.append('\n').append(testPort(host,80,"Web UI"));
++            runOnUiThread(()->statusText.setText(b.toString()));
++        });
++    }
++
++    private String testPort(String host,int port,String name){
++        long start=System.nanoTime(); try(Socket s=new Socket()){ s.connect(new InetSocketAddress(host,port),1800); long ms=(System.nanoTime()-start)/1_000_000L; return name+": OPEN  •  "+ms+" ms"; }
++        catch(Exception e){ return name+": بسته/غیرقابل‌دسترسی  •  "+clean(e); }
++    }
++
++    private void saveCurrentBackup(){ if(snapshot==null){statusText.setText("ابتدا Router را Refresh کنید.");return;} saveBackup(snapshot); statusText.setText("وضعیت Policy/ACL فعلی به‌عنوان Backup امن ذخیره شد."); }
++
++    private void saveBackup(RouterSnapshot s){
++        if(s==null||s.policy<0) return; StringBuilder a=new StringBuilder(); for(String m:s.acl){if(a.length()>0)a.append(';');a.append(m);} prefs.edit().putInt("safe_policy",s.policy).putString("safe_acl",a.toString()).apply();
++    }
++
++    private void restoreBackup(){
++        if(router==null||busy) return; int p=prefs.getInt("safe_policy",-1); String raw=prefs.getString("safe_acl",""); if(p<0){statusText.setText("Backup امنی ذخیره نشده است.");return;}
++        LinkedHashSet<String> acl=new LinkedHashSet<>(); for(String x:raw.split(";")){String m=MacAddress.normalize(x);if(!m.isEmpty())acl.add(m);}
++        new AlertDialog.Builder(this).setTitle("Restore وضعیت امن").setMessage("Policy/ACL ذخیره‌شده دوباره روی Router اعمال و سپس Verify می‌شود.")
++                .setNegativeButton("لغو",null).setPositiveButton("Restore",(d,w)->{setBusy(true,"در حال Restore و Verify…"); executor.execute(()->{try{ActionResult r=router.restoreState(p,acl,managerMac);runOnUiThread(()->consume(r));}catch(Throwable e){runOnUiThread(()->fail("Restore ناموفق: "+clean(e)));}});}).show();
++    }
++
+ 
+     private void setManager(String rawMac) {
+         String mac=MacAddress.normalize(rawMac); if(mac.isEmpty()) return;
+@@ -314,7 +361,7 @@
+     private String aliasFor(String mac){ String a=aliasForStored(mac); return a.trim().isEmpty()?"دستگاه "+mac.substring(Math.max(0,mac.length()-5)):a.trim(); }
+ 
+     private void setBusy(boolean value,String message) { busy=value; if(message!=null) statusText.setText(message); connectButton.setEnabled(!value); enableControls(!value&&router!=null); }
+-    private void enableControls(boolean enabled){ refreshButton.setEnabled(enabled); allowOnlyButton.setEnabled(enabled); emergencyButton.setEnabled(enabled); quarantineButton.setEnabled(enabled); }
++    private void enableControls(boolean enabled){ refreshButton.setEnabled(enabled); allowOnlyButton.setEnabled(enabled); emergencyButton.setEnabled(enabled); quarantineButton.setEnabled(enabled); backupButton.setEnabled(enabled); restoreButton.setEnabled(enabled); advancedButton.setEnabled(true); diagButton.setEnabled(true); }
+ 
+     private EditText input(String hint,String value,int type){ EditText e=new EditText(this); e.setHint(hint); e.setText(value); e.setInputType(type); e.setTextSize(14); return e; }
+     private Button button(String label){ Button b=new Button(this); b.setText(label); b.setAllCaps(false); return b; }
+--- a/app/src/main/java/org/sayeh/wificontrol/RouterWebConsoleActivity.java
++++ b/app/src/main/java/org/sayeh/wificontrol/RouterWebConsoleActivity.java
+@@ -0,0 +1,54 @@
++package org.sayeh.wificontrol;
++
++import android.app.Activity;
++import android.content.ClipData;
++import android.content.ClipboardManager;
++import android.content.Context;
++import android.graphics.Color;
++import android.os.Bundle;
++import android.view.Gravity;
++import android.view.View;
++import android.webkit.WebChromeClient;
++import android.webkit.WebSettings;
++import android.webkit.WebView;
++import android.webkit.WebViewClient;
++import android.widget.Button;
++import android.widget.LinearLayout;
++import android.widget.TextView;
++import android.widget.Toast;
++
++public final class RouterWebConsoleActivity extends Activity {
++    private WebView web;
++    private String host, targetIp, targetMac;
++
++    @Override protected void onCreate(Bundle state) {
++        super.onCreate(state);
++        host=getIntent().getStringExtra("host"); if(host==null||host.trim().isEmpty()) host="192.168.1.1";
++        targetIp=getIntent().getStringExtra("ip"); if(targetIp==null) targetIp="";
++        targetMac=getIntent().getStringExtra("mac"); if(targetMac==null) targetMac="";
++
++        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(Color.WHITE);
++        TextView bar=new TextView(this); bar.setText("کنسول واقعی روتر  •  QoS / Wi‑Fi / Security\nIP: "+(targetIp.isEmpty()?"—":targetIp)+"   MAC: "+(targetMac.isEmpty()?"—":targetMac));
++        bar.setTextSize(14); bar.setPadding(16,12,16,12); bar.setGravity(Gravity.CENTER_VERTICAL); root.addView(bar);
++        LinearLayout actions=new LinearLayout(this); actions.setOrientation(LinearLayout.HORIZONTAL);
++        Button qos=button("رفتن به QoS"); Button copy=button("کپی IP/MAC"); Button reload=button("Reload");
++        actions.addView(qos,new LinearLayout.LayoutParams(0,-2,1)); actions.addView(copy,new LinearLayout.LayoutParams(0,-2,1)); actions.addView(reload,new LinearLayout.LayoutParams(0,-2,1)); root.addView(actions);
++        web=new WebView(this); root.addView(web,new LinearLayout.LayoutParams(-1,0,1)); setContentView(root);
++        WebSettings ws=web.getSettings(); ws.setJavaScriptEnabled(true); ws.setDomStorageEnabled(true); ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW); ws.setBuiltInZoomControls(true); ws.setDisplayZoomControls(false);
++        web.setWebViewClient(new WebViewClient()); web.setWebChromeClient(new WebChromeClient());
++        web.loadUrl("http://"+host+"/");
++        qos.setOnClickListener(v->jumpToQos());
++        copy.setOnClickListener(v->{ ClipboardManager cm=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE); cm.setPrimaryClip(ClipData.newPlainText("router target",targetIp+"\n"+targetMac)); Toast.makeText(this,"IP/MAC کپی شد",Toast.LENGTH_SHORT).show(); });
++        reload.setOnClickListener(v->web.reload());
++    }
++
++    private Button button(String s){ Button b=new Button(this); b.setText(s); b.setAllCaps(false); return b; }
++
++    private void jumpToQos(){
++        String js="(function(){function scan(d){try{var a=d.querySelectorAll('a');for(var i=0;i<a.length;i++){var t=(a[i].innerText||a[i].textContent||'').toLowerCase();var h=(a[i].getAttribute('href')||'').toLowerCase();if(t.indexOf('qos')>=0||h.indexOf('qos')>=0){a[i].click();return true;}}var f=d.querySelectorAll('frame,iframe');for(var j=0;j<f.length;j++){try{if(scan(f[j].contentDocument))return true;}catch(e){}}}catch(e){}return false;}return scan(document)?'ok':'notfound';})()";
++        web.evaluateJavascript(js, value->{ if(value==null||value.contains("notfound")) Toast.makeText(this,"پس از Login: Advanced Setup → QoS را باز کنید. IP انتخابی بالای صفحه آماده است.",Toast.LENGTH_LONG).show(); });
++    }
++
++    @Override public void onBackPressed(){ if(web!=null&&web.canGoBack()) web.goBack(); else super.onBackPressed(); }
++    @Override protected void onDestroy(){ if(web!=null){ web.stopLoading(); web.destroy(); } super.onDestroy(); }
++}
+--- a/app/src/main/java/org/sayeh/wificontrol/core/RouterController.java
++++ b/app/src/main/java/org/sayeh/wificontrol/core/RouterController.java
+@@ -11,5 +11,6 @@
+     ActionResult blockMany(Set<String> macs, String managerMac) throws IOException;
+     ActionResult enableAllowOnly(Set<String> approved, String managerMac) throws IOException;
+     ActionResult disableFilter(String managerMac) throws IOException;
++    ActionResult restoreState(int policy, Set<String> acl, String managerMac) throws IOException;
+     @Override void close() throws IOException;
+ }
+--- a/app/src/main/java/org/sayeh/wificontrol/core/TpLinkCliRouter.java
++++ b/app/src/main/java/org/sayeh/wificontrol/core/TpLinkCliRouter.java
+@@ -93,6 +93,14 @@
+                 "MAC filter disabled and verified by router.");
+     }
+ 
++    @Override public synchronized ActionResult restoreState(int policy, Set<String> acl, String rawManagerMac) throws IOException {
++        if (policy < RouterSnapshot.POLICY_OFF || policy > RouterSnapshot.POLICY_ALLOW)
++            return ActionResult.fail("Invalid backup policy.", null, null);
++        RouterSnapshot before = probe();
++        return applyTransaction(policy, cleanSet(acl), MacAddress.normalize(rawManagerMac), before,
++                "Saved safe state restored and verified by router.");
++    }
++
+     private ActionResult applyTransaction(int targetPolicy, Set<String> rawAcl, String managerMac,
+                                           RouterSnapshot before, String successMessage) throws IOException {
+         LinkedHashSet<String> targetAcl = cleanSet(rawAcl);
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -5,10 +5,12 @@
+     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+     <application
+         android:allowBackup="false"
+-        android:label="WiFi Control V7 Pro"
++        android:usesCleartextTraffic="true"
++        android:label="WiFi Control V8 Router Manager"
+         android:supportsRtl="true"
+         android:theme="@style/AppTheme">
+-        <activity
++        <activity android:name=".RouterWebConsoleActivity" android:exported="false" android:screenOrientation="portrait" />
++<activity
+             android:name=".MainActivity"
+             android:exported="true"
+             android:screenOrientation="portrait">
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -5,11 +5,11 @@
+     compileSdk 35
+ 
+     defaultConfig {
+-        applicationId 'org.sayeh.wificontrol'
++        applicationId 'org.sayeh.wificontrol.v8'
+         minSdk 23
+         targetSdk 35
+-        versionCode 70
+-        versionName '7.0.0-real-control'
++        versionCode 80
++        versionName '8.0.0-router-direct'
+     }
+ 
+     buildTypes {
