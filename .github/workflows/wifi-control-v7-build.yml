@@ -1,4 +1,4 @@
-name: WiFi Control V7 Pro APK
+name: WiFi Control V7.1 Safety Lock APK
 
 on:
   push:
@@ -23,16 +23,151 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Reconstruct source
+      - name: Reconstruct validated V7 source
         shell: bash
         run: |
           set -euo pipefail
           cat wificontrol-build/source.part* | tr -d '\n\r' | base64 -d > /tmp/WiFiControlV7Pro_source.zip
-          unzip -t /tmp/WiFiControlV7Pro_source.zip
-          rm -rf /tmp/wificontrol-v7
-          mkdir -p /tmp/wificontrol-v7
-          unzip -q /tmp/WiFiControlV7Pro_source.zip -d /tmp/wificontrol-v7
-          test -f /tmp/wificontrol-v7/WiFiControlV6/app/build.gradle
+          unzip -t /tmp/WiFiControlV7Pro_source.zip >/dev/null
+          rm -rf /tmp/wificontrol-safe
+          mkdir -p /tmp/wificontrol-safe
+          unzip -q /tmp/WiFiControlV7Pro_source.zip -d /tmp/wificontrol-safe
+          test -f /tmp/wificontrol-safe/WiFiControlV6/app/build.gradle
+
+      - name: Apply hard Safety Lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/wificontrol-safe/WiFiControlV6
+          cat > "$ROOT/app/src/main/java/org/sayeh/wificontrol/core/TpLinkCliRouter.java" <<'EOF'
+          package org.sayeh.wificontrol.core;
+
+          import java.io.IOException;
+          import java.util.Set;
+
+          public final class TpLinkCliRouter implements RouterController {
+              private static final long READ_TIMEOUT = 4500L;
+              private final RouterProfile profile;
+              private final CommandTransportFactory transportFactory;
+              private final RouterParser parser = new RouterParser();
+              private CommandTransport session;
+
+              public TpLinkCliRouter(RouterProfile profile, CommandTransportFactory transportFactory) {
+                  this.profile = profile;
+                  this.transportFactory = transportFactory;
+              }
+
+              @Override public synchronized void connect() throws IOException {
+                  ensureSession();
+                  probe();
+              }
+
+              @Override public synchronized RouterSnapshot probe() throws IOException {
+                  IOException last = null;
+                  for (int attempt = 0; attempt < 2; attempt++) {
+                      try {
+                          ensureSession();
+                          String wifi = run("rtwlan showmactable", READ_TIMEOUT, true);
+                          String arp = run("ip arp status", READ_TIMEOUT, true);
+                          return parser.parse(wifi, arp, "");
+                      } catch (IOException e) {
+                          last = e;
+                          closeSession();
+                      }
+                  }
+                  throw new IOException("Read-only probe failed", last);
+              }
+
+              private ActionResult locked() {
+                  return ActionResult.fail("Safety Lock active: router configuration writes are disabled.", null, null);
+              }
+
+              @Override public synchronized ActionResult setBlocked(String mac, boolean blocked, String managerMac) {
+                  return locked();
+              }
+
+              @Override public synchronized ActionResult blockMany(Set<String> macs, String managerMac) {
+                  return locked();
+              }
+
+              @Override public synchronized ActionResult enableAllowOnly(Set<String> approved, String managerMac) {
+                  return locked();
+              }
+
+              @Override public synchronized ActionResult disableFilter(String managerMac) {
+                  return locked();
+              }
+
+              private String run(String command, long timeout, boolean promptRequired) throws IOException {
+                  ensureSession();
+                  try { return session.command(command, timeout, promptRequired); }
+                  catch (IOException e) { closeSession(); throw e; }
+              }
+
+              private void ensureSession() throws IOException {
+                  if (session != null && session.isConnected()) return;
+                  closeSession();
+                  session = transportFactory.create(profile.host, profile.port, profile.password);
+                  session.connect();
+              }
+
+              private void closeSession() {
+                  if (session != null) try { session.close(); } catch (Exception ignored) {}
+                  session = null;
+              }
+
+              @Override public synchronized void close() { closeSession(); }
+          }
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/wificontrol-safe/WiFiControlV6')
+
+          p=root/'app/src/main/java/org/sayeh/wificontrol/MainActivity.java'
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('WiFi Control V7 Pro', 'WiFi Control V7 Safe Monitor')
+          s=s.replace('allowOnlyButton=button("فقط Approvedها"); emergencyButton=button("بازکردن اضطراری");',
+                      'allowOnlyButton=button("Allow-List — قفل ایمنی"); emergencyButton=button("Emergency — قفل ایمنی");')
+          s=s.replace('quarantineButton=button("قرنطینه ناشناس‌ها"); monitorButton=button("مانیتور زنده: خاموش");',
+                      'quarantineButton=button("قرنطینه — قفل ایمنی"); monitorButton=button("مانیتور زنده: خاموش");')
+          s=s.replace('private void enableControls(boolean enabled){ refreshButton.setEnabled(enabled); allowOnlyButton.setEnabled(enabled); emergencyButton.setEnabled(enabled); quarantineButton.setEnabled(enabled); }',
+          '''private void enableControls(boolean enabled){
+                  refreshButton.setEnabled(enabled);
+                  allowOnlyButton.setEnabled(false);
+                  emergencyButton.setEnabled(false);
+                  quarantineButton.setEnabled(false);
+              }''')
+          s=s.replace('blockButton.setEnabled(!manager&&s.policy!=RouterSnapshot.POLICY_ALLOW&&!busy);',
+                      'blockButton.setEnabled(false); blockButton.setText("Block/Unblock — قفل ایمنی");')
+          s=s.replace('diagnosticText.setText("Policy: "+policyName(s.policy)+"   |   ACL: "+s.acl.size()+"   |   دستگاه‌های فعلی: "+s.devices.size());',
+          '''diagnosticText.setText("SAFETY LOCK: فقط خواندن — هیچ فرمان تغییر تنظیمات فعال نیست\\n"+
+                          "دستگاه‌های فعلی: "+s.devices.size()+"   |   Router write: DISABLED");''')
+          p.write_text(s,encoding='utf-8')
+
+          b=root/'app/build.gradle'
+          s=b.read_text(encoding='utf-8')
+          s=s.replace("applicationId 'org.sayeh.wificontrol'","applicationId 'org.sayeh.wificontrol.safe'")
+          s=s.replace("versionCode 70","versionCode 71")
+          s=s.replace("versionName '7.0.0-real-control'","versionName '7.1.0-safety-lock'")
+          b.write_text(s,encoding='utf-8')
+
+          m=root/'app/src/main/AndroidManifest.xml'
+          s=m.read_text(encoding='utf-8').replace('android:label="WiFi Control V7 Pro"','android:label="WiFi Control Safe Monitor"')
+          m.write_text(s,encoding='utf-8')
+          PY
+
+      - name: Source-level no-write gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/wificontrol-safe/WiFiControlV6/app/src/main
+          if grep -RInE 'rt node accesspolicy|rt node acladdentry|rt node save|rt node index' "$ROOT"; then
+            echo "Forbidden router write/context command found"
+            exit 1
+          fi
+          test "$(grep -Rho 'rtwlan showmactable' "$ROOT" | wc -l)" -eq 1
+          test "$(grep -Rho 'ip arp status' "$ROOT" | wc -l)" -eq 1
 
       - name: Install Android SDK 35
         shell: bash
@@ -47,36 +182,99 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
 
-      - name: Regression tests
-        working-directory: /tmp/wificontrol-v7/WiFiControlV6
-        run: bash tools/run_core_tests.sh
-
-      - name: Build debug APK
-        working-directory: /tmp/wificontrol-v7/WiFiControlV6
-        run: gradle :app:assembleDebug --stacktrace
-
-      - name: Validate APK
+      - name: Safety behavior test
         shell: bash
         run: |
           set -euo pipefail
-          APK=/tmp/wificontrol-v7/WiFiControlV6/app/build/outputs/apk/debug/app-debug.apk
+          ROOT=/tmp/wificontrol-safe/WiFiControlV6
+          cat > /tmp/SafetyLockTest.java <<'EOF'
+          package org.sayeh.wificontrol.core;
+          import java.io.IOException;
+          import java.util.*;
+
+          public final class SafetyLockTest {
+            static final class F implements CommandTransportFactory {
+              final List<String> commands=new ArrayList<>();
+              public CommandTransport create(String h,int p,String pw) {
+                return new CommandTransport() {
+                  boolean on;
+                  public void connect(){on=true;}
+                  public boolean isConnected(){return on;}
+                  public String command(String c,long t,boolean pr) throws IOException {
+                    commands.add(c);
+                    if(c.equals("rtwlan showmactable")) return "00:11:22:33:44:55 -50/-90/40\nTP-LINK>";
+                    if(c.equals("ip arp status")) return "192.168.1.2 00:11:22:33:44:55\nTP-LINK>";
+                    throw new IOException("unexpected command: "+c);
+                  }
+                  public void close(){on=false;}
+                };
+              }
+            }
+            static void ok(boolean v,String m){ if(!v) throw new AssertionError(m); }
+            public static void main(String[] a) throws Exception {
+              F f=new F();
+              TpLinkCliRouter r=new TpLinkCliRouter(new RouterProfile("192.168.1.1",23,0,"pw"),f);
+              RouterSnapshot s=r.probe();
+              ok(s.devices.size()==1,"probe");
+              ok(f.commands.equals(Arrays.asList("rtwlan showmactable","ip arp status")),"only two read commands");
+              int before=f.commands.size();
+              Set<String> x=new LinkedHashSet<>(); x.add("66:77:88:99:aa:bb");
+              ok(!r.setBlocked("66:77:88:99:aa:bb",true,"00:11:22:33:44:55").success,"block locked");
+              ok(!r.blockMany(x,"00:11:22:33:44:55").success,"batch locked");
+              ok(!r.enableAllowOnly(x,"00:11:22:33:44:55").success,"allow locked");
+              ok(!r.disableFilter("00:11:22:33:44:55").success,"emergency locked");
+              ok(f.commands.size()==before,"mutation APIs sent zero router commands");
+              System.out.println("PASS safety behavior test");
+            }
+          }
+          EOF
+          OUT=/tmp/safety-test-out
+          rm -rf "$OUT"; mkdir -p "$OUT"
+          javac -encoding UTF-8 -d "$OUT" \
+            $(find "$ROOT/app/src/main/java/org/sayeh/wificontrol/core" -name '*.java' | sort) \
+            /tmp/SafetyLockTest.java
+          java -ea -cp "$OUT" org.sayeh.wificontrol.core.SafetyLockTest
+
+      - name: Build Safety Lock APK
+        working-directory: /tmp/wificontrol-safe/WiFiControlV6
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Binary no-write gate and APK validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/wificontrol-safe/WiFiControlV6/app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
           unzip -t "$APK" >/dev/null
+
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
-          "$AAPT" dump badging "$APK" | tee /tmp/badging.txt
-          grep -F "package: name='org.sayeh.wificontrol'" /tmp/badging.txt
-          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/signature.txt
-          sha256sum "$APK" | tee /tmp/SHA256.txt
-          cp "$APK" /tmp/WiFiControlV7Pro.apk
+
+          "$AAPT" dump badging "$APK" | tee /tmp/safe-badging.txt
+          grep -F "package: name='org.sayeh.wificontrol.safe' versionCode='71' versionName='7.1.0-safety-lock'" /tmp/safe-badging.txt
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/safe-signature.txt
+
+          mkdir -p /tmp/dexscan
+          unzip -q "$APK" 'classes*.dex' -d /tmp/dexscan
+          strings /tmp/dexscan/classes*.dex > /tmp/dex-strings.txt
+          if grep -E 'rt node accesspolicy|rt node acladdentry|rt node save|rt node index' /tmp/dex-strings.txt; then
+            echo "Forbidden router command survived into binary"
+            exit 1
+          fi
+          grep -F 'rtwlan showmactable' /tmp/dex-strings.txt
+          grep -F 'ip arp status' /tmp/dex-strings.txt
+
+          sha256sum "$APK" | tee /tmp/SafetyLock-SHA256.txt
+          cp "$APK" /tmp/WiFiControlV7_1-SafetyLock.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WiFiControlV7Pro-APK
+          name: WiFiControlV7_1-SafetyLock-APK
           path: |
-            /tmp/WiFiControlV7Pro.apk
-            /tmp/SHA256.txt
-            /tmp/badging.txt
-            /tmp/signature.txt
+            /tmp/WiFiControlV7_1-SafetyLock.apk
+            /tmp/SafetyLock-SHA256.txt
+            /tmp/safe-badging.txt
+            /tmp/safe-signature.txt
+            /tmp/dex-strings.txt
           if-no-files-found: error
           retention-days: 7
