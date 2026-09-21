@@ -165,7 +165,7 @@ jobs:
                   selectWlan();
 
                   // Fail-open sequence. Filtering stays OFF while ACL is rebuilt.
-                  // IMPORTANT: there is intentionally NO persistent "rt node save".
+                  // Persistent configuration commit is intentionally disabled.
                   run("rt node accesspolicy 0", WRITE_TIMEOUT, true);
                   run("rt node acladdentry \"\"", WRITE_TIMEOUT, true);
                   if (!acl.isEmpty()) run("rt node acladdentry " + joinAcl(acl), WRITE_TIMEOUT, true);
