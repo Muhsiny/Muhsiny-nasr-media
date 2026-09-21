@@ -318,7 +318,7 @@ helpers = r'''    private GradientDrawable rounded(int color,int radiusDp){
 '''
 
 pattern = r"    private EditText input\(.*?    private int dp\(int v\)\{ return Math\.round\(v\*getResources\(\)\.getDisplayMetrics\(\)\.density\); \}\n"
-s, n = re.subn(pattern, helpers, s, count=1, flags=re.S)
+s, n = re.subn(pattern, lambda m: helpers, s, count=1, flags=re.S)
 if n != 1:
     raise SystemExit("UI helper replacement failed")
 
