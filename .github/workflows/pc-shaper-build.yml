@@ -1,0 +1,47 @@
+name: Build Windows Per-IP Shaper
+
+on:
+  push:
+    branches: [ wifi-control-v7-build ]
+    paths:
+      - '.github/workflows/pc-shaper-build.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch official Microsoft TC sample
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path pc-shaper | Out-Null
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/microsoft/Windows-classic-samples/main/Samples/Win7Samples/netds/Qos/TC/TCSample.c" -OutFile "pc-shaper/TCSample.c"
+          if (-not (Select-String -Path "pc-shaper/TCSample.c" -SimpleMatch "TcAddFilter")) { throw "Source validation failed" }
+          if (-not (Select-String -Path "pc-shaper/TCSample.c" -SimpleMatch "-throttle")) { throw "Throttle support missing" }
+
+      - name: Locate MSVC
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VS=%%i
+          echo VS=%VS%
+          call "%VS%\Common7\Tools\VsDevCmd.bat" -arch=x64
+          cl /nologo /W3 /O2 /D_WIN32_WINNT=0x0600 pc-shaper\TCSample.c /Fe:pc-shaper\WifiIpShaper.exe /link Traffic.lib Ws2_32.lib Iphlpapi.lib
+
+      - name: Verify binary
+        shell: pwsh
+        run: |
+          if (!(Test-Path "pc-shaper/WifiIpShaper.exe")) { throw "EXE missing" }
+          $h=(Get-FileHash "pc-shaper/WifiIpShaper.exe" -Algorithm SHA256).Hash
+          Set-Content "pc-shaper/SHA256.txt" $h
+          Get-Item "pc-shaper/WifiIpShaper.exe" | Format-List Name,Length,LastWriteTime
+          Write-Host "SHA256=$h"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WifiIpShaper-Windows-x64
+          path: |
+            pc-shaper/WifiIpShaper.exe
+            pc-shaper/SHA256.txt
+          retention-days: 7
