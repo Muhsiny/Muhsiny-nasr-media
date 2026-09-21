@@ -1,4 +1,4 @@
-name: WiFi Control V7.1 Safety Lock APK
+name: WiFi Control V7.2 Safe Control APK
 
 on:
   push:
@@ -29,24 +29,27 @@ jobs:
           set -euo pipefail
           cat wificontrol-build/source.part* | tr -d '\n\r' | base64 -d > /tmp/WiFiControlV7Pro_source.zip
           unzip -t /tmp/WiFiControlV7Pro_source.zip >/dev/null
-          rm -rf /tmp/wificontrol-safe
-          mkdir -p /tmp/wificontrol-safe
-          unzip -q /tmp/WiFiControlV7Pro_source.zip -d /tmp/wificontrol-safe
-          test -f /tmp/wificontrol-safe/WiFiControlV6/app/build.gradle
+          rm -rf /tmp/wificontrol-safecontrol
+          mkdir -p /tmp/wificontrol-safecontrol
+          unzip -q /tmp/WiFiControlV7Pro_source.zip -d /tmp/wificontrol-safecontrol
+          test -f /tmp/wificontrol-safecontrol/WiFiControlV6/app/build.gradle
 
-      - name: Apply hard Safety Lock
+      - name: Apply Safe Control engine
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=/tmp/wificontrol-safe/WiFiControlV6
+          ROOT=/tmp/wificontrol-safecontrol/WiFiControlV6
           cat > "$ROOT/app/src/main/java/org/sayeh/wificontrol/core/TpLinkCliRouter.java" <<'EOF'
           package org.sayeh.wificontrol.core;
 
           import java.io.IOException;
+          import java.util.LinkedHashSet;
           import java.util.Set;
 
           public final class TpLinkCliRouter implements RouterController {
               private static final long READ_TIMEOUT = 4500L;
+              private static final long WRITE_TIMEOUT = 4500L;
+              private static final int MAX_SAFE_ACL = 8;
               private final RouterProfile profile;
               private final CommandTransportFactory transportFactory;
               private final RouterParser parser = new RouterParser();
@@ -64,38 +67,139 @@ jobs:
 
               @Override public synchronized RouterSnapshot probe() throws IOException {
                   IOException last = null;
-                  for (int attempt = 0; attempt < 2; attempt++) {
+                  for (int attempt=0; attempt<2; attempt++) {
                       try {
                           ensureSession();
+                          selectWlan();
                           String wifi = run("rtwlan showmactable", READ_TIMEOUT, true);
                           String arp = run("ip arp status", READ_TIMEOUT, true);
-                          return parser.parse(wifi, arp, "");
+                          String config = run("rt node display", READ_TIMEOUT, true);
+                          RouterSnapshot snapshot = parser.parse(wifi, arp, config);
+                          if (snapshot.policy < 0) throw new IOException("Router policy could not be read safely");
+                          return snapshot;
                       } catch (IOException e) {
                           last = e;
                           closeSession();
                       }
                   }
-                  throw new IOException("Read-only probe failed", last);
+                  throw new IOException("Probe failed", last);
               }
 
-              private ActionResult locked() {
-                  return ActionResult.fail("Safety Lock active: router configuration writes are disabled.", null, null);
+              @Override public synchronized ActionResult setBlocked(String rawMac, boolean blocked, String rawManagerMac) throws IOException {
+                  String mac = requireMac(rawMac, "device");
+                  String manager = requireMac(rawManagerMac, "manager");
+                  if (mac.equals(manager)) return ActionResult.fail("Manager device is protected and cannot be blocked.", null, null);
+
+                  RouterSnapshot before = probe();
+                  if (before.policy != RouterSnapshot.POLICY_OFF && before.policy != RouterSnapshot.POLICY_DENY)
+                      return ActionResult.fail("Safe Control refuses writes while router policy is not OFF/DENY.", before, before);
+                  if (before.acl.size() > MAX_SAFE_ACL)
+                      return ActionResult.fail("ACL is larger than Safe Control limit; no write was attempted.", before, before);
+
+                  LinkedHashSet<String> targetAcl = new LinkedHashSet<>(before.acl);
+                  targetAcl.remove(manager);
+                  if (blocked) {
+                      if (!targetAcl.contains(mac) && targetAcl.size() >= MAX_SAFE_ACL)
+                          return ActionResult.fail("Safe ACL limit reached; no write was attempted.", before, before);
+                      targetAcl.add(mac);
+                  } else {
+                      targetAcl.remove(mac);
+                  }
+
+                  int targetPolicy = targetAcl.isEmpty() ? RouterSnapshot.POLICY_OFF : RouterSnapshot.POLICY_DENY;
+                  return applyVolatileTransaction(targetPolicy, targetAcl, manager, before,
+                          blocked ? "Device blocked in Safe Control mode and verified."
+                                  : "Device unblocked in Safe Control mode and verified.");
               }
 
-              @Override public synchronized ActionResult setBlocked(String mac, boolean blocked, String managerMac) {
-                  return locked();
+              @Override public synchronized ActionResult blockMany(Set<String> rawMacs, String rawManagerMac) {
+                  return ActionResult.fail("Batch quarantine disabled in Safe Control mode.", null, null);
               }
 
-              @Override public synchronized ActionResult blockMany(Set<String> macs, String managerMac) {
-                  return locked();
+              @Override public synchronized ActionResult enableAllowOnly(Set<String> approved, String rawManagerMac) {
+                  return ActionResult.fail("Allow-list writes disabled in Safe Control mode.", null, null);
               }
 
-              @Override public synchronized ActionResult enableAllowOnly(Set<String> approved, String managerMac) {
-                  return locked();
+              @Override public synchronized ActionResult disableFilter(String rawManagerMac) throws IOException {
+                  requireMac(rawManagerMac, "manager");
+                  RouterSnapshot before = probe();
+                  if (before.policy != RouterSnapshot.POLICY_OFF && before.policy != RouterSnapshot.POLICY_DENY)
+                      return ActionResult.fail("Emergency open refused because current policy is not safely understood.", before, before);
+                  ensureSession();
+                  selectWlan();
+                  run("rt node accesspolicy 0", WRITE_TIMEOUT, true);
+                  RouterSnapshot after = probeWithRetry();
+                  if (after.policy == RouterSnapshot.POLICY_OFF)
+                      return ActionResult.ok("MAC filtering disabled in Safe Control mode and verified.", before, after);
+                  return ActionResult.fail("Emergency open verification failed.", before, after);
               }
 
-              @Override public synchronized ActionResult disableFilter(String managerMac) {
-                  return locked();
+              private ActionResult applyVolatileTransaction(int targetPolicy, Set<String> rawAcl, String managerMac,
+                                                            RouterSnapshot before, String successMessage) throws IOException {
+                  LinkedHashSet<String> targetAcl = cleanSet(rawAcl);
+                  targetAcl.remove(managerMac);
+                  try {
+                      writeVolatilePolicy(targetPolicy, targetAcl);
+                      RouterSnapshot after = probeWithRetry();
+                      if (after.samePolicyAndAcl(targetPolicy, targetAcl))
+                          return ActionResult.ok(successMessage, before, after);
+
+                      RollbackOutcome rollback = rollbackVolatile(before, managerMac);
+                      RouterSnapshot finalState = rollback.snapshot != null ? rollback.snapshot : after;
+                      return ActionResult.failWithRollback(
+                              "Verification mismatch. Safe rollback attempted: " + rollback.success,
+                              before, finalState, rollback.success);
+                  } catch (IOException failure) {
+                      RollbackOutcome rollback = RollbackOutcome.failed(null);
+                      try { rollback = rollbackVolatile(before, managerMac); } catch (Exception ignored) {}
+                      return ActionResult.failWithRollback(
+                              "Operation failed: " + safe(failure) + ". Safe rollback: " + rollback.success,
+                              before, rollback.snapshot, rollback.success);
+                  }
+              }
+
+              private void writeVolatilePolicy(int policy, Set<String> acl) throws IOException {
+                  if (policy != RouterSnapshot.POLICY_OFF && policy != RouterSnapshot.POLICY_DENY)
+                      throw new IOException("Unsafe policy rejected");
+                  ensureSession();
+                  selectWlan();
+
+                  // Fail-open sequence. Filtering stays OFF while ACL is rebuilt.
+                  // IMPORTANT: there is intentionally NO persistent "rt node save".
+                  run("rt node accesspolicy 0", WRITE_TIMEOUT, true);
+                  run("rt node acladdentry \"\"", WRITE_TIMEOUT, true);
+                  if (!acl.isEmpty()) run("rt node acladdentry " + joinAcl(acl), WRITE_TIMEOUT, true);
+                  run("rt node accesspolicy " + policy, WRITE_TIMEOUT, true);
+              }
+
+              private RollbackOutcome rollbackVolatile(RouterSnapshot before, String managerMac) throws IOException {
+                  if (before == null || (before.policy != RouterSnapshot.POLICY_OFF && before.policy != RouterSnapshot.POLICY_DENY))
+                      return RollbackOutcome.failed(null);
+                  LinkedHashSet<String> safeAcl = new LinkedHashSet<>(before.acl);
+                  safeAcl.remove(managerMac);
+                  writeVolatilePolicy(before.policy, safeAcl);
+                  RouterSnapshot restored = probeWithRetry();
+                  return new RollbackOutcome(restored.samePolicyAndAcl(before.policy, safeAcl), restored);
+              }
+
+              private static final class RollbackOutcome {
+                  final boolean success;
+                  final RouterSnapshot snapshot;
+                  RollbackOutcome(boolean success, RouterSnapshot snapshot) { this.success=success; this.snapshot=snapshot; }
+                  static RollbackOutcome failed(RouterSnapshot snapshot) { return new RollbackOutcome(false, snapshot); }
+              }
+
+              private RouterSnapshot probeWithRetry() throws IOException {
+                  IOException last = null;
+                  for (int i=0; i<3; i++) {
+                      try { return probe(); }
+                      catch (IOException e) { last=e; sleep(350L*(i+1)); }
+                  }
+                  throw new IOException("Verify timeout", last);
+              }
+
+              private void selectWlan() throws IOException {
+                  run("rt node index 1", WRITE_TIMEOUT, true);
               }
 
               private String run(String command, long timeout, boolean promptRequired) throws IOException {
@@ -117,57 +221,93 @@ jobs:
               }
 
               @Override public synchronized void close() { closeSession(); }
+
+              private static LinkedHashSet<String> cleanSet(Set<String> input) {
+                  LinkedHashSet<String> out = new LinkedHashSet<>();
+                  if (input != null) for (String x : input) {
+                      String n = MacAddress.normalize(x);
+                      if (!n.isEmpty()) out.add(n);
+                  }
+                  return out;
+              }
+
+              private static String requireMac(String value, String label) {
+                  String mac = MacAddress.normalize(value);
+                  if (mac.isEmpty()) throw new IllegalArgumentException("Invalid " + label + " MAC address");
+                  return mac;
+              }
+
+              private static String joinAcl(Set<String> acl) {
+                  StringBuilder b = new StringBuilder();
+                  for (String mac : acl) {
+                      if (b.length() > 0) b.append(';');
+                      b.append(mac);
+                  }
+                  return b.toString();
+              }
+
+              private static String safe(Throwable t) {
+                  String m = t == null ? "" : t.getMessage();
+                  return m == null || m.trim().isEmpty() ? t.getClass().getSimpleName() : m.trim();
+              }
+
+              private static void sleep(long ms) {
+                  try { Thread.sleep(ms); }
+                  catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+              }
           }
           EOF
 
           python3 - <<'PY'
           from pathlib import Path
-          root=Path('/tmp/wificontrol-safe/WiFiControlV6')
-
+          root=Path('/tmp/wificontrol-safecontrol/WiFiControlV6')
           p=root/'app/src/main/java/org/sayeh/wificontrol/MainActivity.java'
           s=p.read_text(encoding='utf-8')
-          s=s.replace('WiFi Control V7 Pro', 'WiFi Control V7 Safe Monitor')
-          s=s.replace('allowOnlyButton=button("فقط Approvedها"); emergencyButton=button("بازکردن اضطراری");',
-                      'allowOnlyButton=button("Allow-List — قفل ایمنی"); emergencyButton=button("Emergency — قفل ایمنی");')
+          s=s.replace('WiFi Control V7 Pro','WiFi Control V7.2 Safe Control')
+          s=s.replace('کنترل واقعی Router با Verify و محافظت در برابر قفل‌شدن مدیر',
+                      'کنترل محدود و امن‌تر: فقط Block/Unblock، بدون Reset/Reboot/Persistent Save')
+          s=s.replace('nodeInput=input("WLAN node",String.valueOf(prefs.getInt("wlan_node",0)),InputType.TYPE_CLASS_NUMBER);',
+                      'nodeInput=input("WLAN node (قفل ایمنی)","1",InputType.TYPE_CLASS_NUMBER); nodeInput.setEnabled(false);')
+          s=s.replace('int parsedNode;\n        try { parsedNode=Integer.parseInt(nodeInput.getText().toString().trim()); }\n        catch(Exception e) { statusText.setText("WLAN node نامعتبر است."); return; }\n        final int node=parsedNode;\n        prefs.edit().putString("router_host",host).putInt("wlan_node",node).apply();',
+                      'final int node=1;\n        prefs.edit().putString("router_host",host).apply();')
+          s=s.replace('allowOnlyButton=button("فقط دستگاه‌های مجاز"); emergencyButton=button("بازکردن اضطراری");',
+                      'allowOnlyButton=button("Allow-List — غیرفعال"); emergencyButton=button("بازکردن اضطراری فیلتر");')
           s=s.replace('quarantineButton=button("قرنطینه ناشناس‌ها"); monitorButton=button("مانیتور زنده: خاموش");',
-                      'quarantineButton=button("قرنطینه — قفل ایمنی"); monitorButton=button("مانیتور زنده: خاموش");')
+                      'quarantineButton=button("قرنطینه گروهی — غیرفعال"); monitorButton=button("مانیتور زنده: خاموش");')
+          s=s.replace('allowOnlyButton.setOnClickListener(v->confirmAllowOnly());',
+                      'allowOnlyButton.setOnClickListener(v->statusText.setText("Allow-List در Safe Control عمداً غیرفعال است."));')
+          s=s.replace('quarantineButton.setOnClickListener(v->confirmQuarantineUnknown());',
+                      'quarantineButton.setOnClickListener(v->statusText.setText("قرنطینه گروهی در Safe Control عمداً غیرفعال است."));')
           s=s.replace('private void enableControls(boolean enabled){ refreshButton.setEnabled(enabled); allowOnlyButton.setEnabled(enabled); emergencyButton.setEnabled(enabled); quarantineButton.setEnabled(enabled); }',
-          '''private void enableControls(boolean enabled){
-                  refreshButton.setEnabled(enabled);
-                  allowOnlyButton.setEnabled(false);
-                  emergencyButton.setEnabled(false);
-                  quarantineButton.setEnabled(false);
-              }''')
-          s=s.replace('blockButton.setEnabled(!manager&&s.policy!=RouterSnapshot.POLICY_ALLOW&&!busy);',
-                      'blockButton.setEnabled(false); blockButton.setText("Block/Unblock — قفل ایمنی");')
+                      'private void enableControls(boolean enabled){ refreshButton.setEnabled(enabled); allowOnlyButton.setEnabled(false); emergencyButton.setEnabled(enabled); quarantineButton.setEnabled(false); }')
           s=s.replace('diagnosticText.setText("Policy: "+policyName(s.policy)+"   |   ACL: "+s.acl.size()+"   |   دستگاه‌های فعلی: "+s.devices.size());',
-          '''diagnosticText.setText("SAFETY LOCK: فقط خواندن — هیچ فرمان تغییر تنظیمات فعال نیست\\n"+
-                          "دستگاه‌های فعلی: "+s.devices.size()+"   |   Router write: DISABLED");''')
+                      'diagnosticText.setText("SAFE CONTROL | Policy: "+policyName(s.policy)+" | ACL: "+s.acl.size()+" | دستگاه‌ها: "+s.devices.size()+"\\nPersistent SAVE: DISABLED | WLAN node: 1");')
           p.write_text(s,encoding='utf-8')
 
           b=root/'app/build.gradle'
           s=b.read_text(encoding='utf-8')
-          s=s.replace("applicationId 'org.sayeh.wificontrol'","applicationId 'org.sayeh.wificontrol.safe'")
-          s=s.replace("versionCode 70","versionCode 71")
-          s=s.replace("versionName '7.0.0-real-control'","versionName '7.1.0-safety-lock'")
+          s=s.replace("applicationId 'org.sayeh.wificontrol'","applicationId 'org.sayeh.wificontrol.safecontrol'")
+          s=s.replace("versionCode 70","versionCode 72")
+          s=s.replace("versionName '7.0.0-real-control'","versionName '7.2.0-safe-control-volatile'")
           b.write_text(s,encoding='utf-8')
 
           m=root/'app/src/main/AndroidManifest.xml'
-          s=m.read_text(encoding='utf-8').replace('android:label="WiFi Control V7 Pro"','android:label="WiFi Control Safe Monitor"')
+          s=m.read_text(encoding='utf-8').replace('android:label="WiFi Control V7 Pro"','android:label="WiFi Control Safe Control"')
           m.write_text(s,encoding='utf-8')
           PY
 
-      - name: Source-level no-write gate
+      - name: Source safety gate
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=/tmp/wificontrol-safe/WiFiControlV6/app/src/main
-          if grep -RInE 'rt node accesspolicy|rt node acladdentry|rt node save|rt node index' "$ROOT"; then
-            echo "Forbidden router write/context command found"
+          ROOT=/tmp/wificontrol-safecontrol/WiFiControlV6/app/src/main/java
+          if grep -RInE 'rt node save|factory|firmware|reboot|reset|txpower|wlan active|wan ' "$ROOT"; then
+            echo "Forbidden persistent/destructive command found"
             exit 1
           fi
-          test "$(grep -Rho 'rtwlan showmactable' "$ROOT" | wc -l)" -eq 1
-          test "$(grep -Rho 'ip arp status' "$ROOT" | wc -l)" -eq 1
+          grep -F 'rt node index 1' "$ROOT/org/sayeh/wificontrol/core/TpLinkCliRouter.java"
+          grep -F 'rt node accesspolicy 0' "$ROOT/org/sayeh/wificontrol/core/TpLinkCliRouter.java"
+          grep -F 'rt node acladdentry' "$ROOT/org/sayeh/wificontrol/core/TpLinkCliRouter.java"
 
       - name: Install Android SDK 35
         shell: bash
@@ -182,99 +322,133 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
 
-      - name: Safety behavior test
+      - name: Safe Control behavior test
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=/tmp/wificontrol-safe/WiFiControlV6
-          cat > /tmp/SafetyLockTest.java <<'EOF'
+          ROOT=/tmp/wificontrol-safecontrol/WiFiControlV6
+          cat > /tmp/SafeControlTest.java <<'EOF'
           package org.sayeh.wificontrol.core;
           import java.io.IOException;
           import java.util.*;
 
-          public final class SafetyLockTest {
+          public final class SafeControlTest {
             static final class F implements CommandTransportFactory {
               final List<String> commands=new ArrayList<>();
+              int policy=0;
+              LinkedHashSet<String> acl=new LinkedHashSet<>();
+              boolean connected=false;
               public CommandTransport create(String h,int p,String pw) {
                 return new CommandTransport() {
-                  boolean on;
-                  public void connect(){on=true;}
-                  public boolean isConnected(){return on;}
+                  public void connect(){connected=true;}
+                  public boolean isConnected(){return connected;}
                   public String command(String c,long t,boolean pr) throws IOException {
                     commands.add(c);
-                    if(c.equals("rtwlan showmactable")) return "00:11:22:33:44:55 -50/-90/40\nTP-LINK>";
-                    if(c.equals("ip arp status")) return "192.168.1.2 00:11:22:33:44:55\nTP-LINK>";
-                    throw new IOException("unexpected command: "+c);
+                    if(c.equals("rt node index 1")) return "TP-LINK>";
+                    if(c.equals("rtwlan showmactable")) return "00:11:22:33:44:55 -45/-90/40\n66:77:88:99:aa:bb -50/-90/40\nTP-LINK>";
+                    if(c.equals("ip arp status")) return "192.168.1.2 00:11:22:33:44:55\n192.168.1.3 66:77:88:99:aa:bb\nTP-LINK>";
+                    if(c.equals("rt node display")) {
+                      StringBuilder b=new StringBuilder("WLAN policy(foo): "+policy+"\nWLAN AccessControlList:\n");
+                      for(String m:acl)b.append(m).append("\n");
+                      b.append("WLAN wpapsk: x\nTP-LINK>");
+                      return b.toString();
+                    }
+                    if(c.equals("rt node accesspolicy 0")){policy=0;return "TP-LINK>";}
+                    if(c.equals("rt node accesspolicy 1")){policy=1;return "TP-LINK>";}
+                    if(c.equals("rt node acladdentry \"\"")){acl.clear();return "TP-LINK>";}
+                    if(c.startsWith("rt node acladdentry ")){
+                      acl.clear();
+                      for(String m:c.substring("rt node acladdentry ".length()).split(";"))if(!m.isBlank())acl.add(m);
+                      return "TP-LINK>";
+                    }
+                    throw new IOException("unexpected:"+c);
                   }
-                  public void close(){on=false;}
+                  public void close(){connected=false;}
                 };
               }
             }
-            static void ok(boolean v,String m){ if(!v) throw new AssertionError(m); }
-            public static void main(String[] a) throws Exception {
+
+            static void ok(boolean v,String m){if(!v)throw new AssertionError(m);}
+            public static void main(String[] args) throws Exception {
               F f=new F();
-              TpLinkCliRouter r=new TpLinkCliRouter(new RouterProfile("192.168.1.1",23,0,"pw"),f);
+              TpLinkCliRouter r=new TpLinkCliRouter(new RouterProfile("192.168.1.1",23,1,"pw"),f);
               RouterSnapshot s=r.probe();
-              ok(s.devices.size()==1,"probe");
-              ok(f.commands.equals(Arrays.asList("rtwlan showmactable","ip arp status")),"only two read commands");
+              ok(s.policy==0,"probe off");
+              int base=f.commands.size();
+              ActionResult mgr=r.setBlocked("00:11:22:33:44:55",true,"00:11:22:33:44:55");
+              ok(!mgr.success,"manager protected");
+              ok(f.commands.size()==base,"manager block sent no write");
+
+              ActionResult b=r.setBlocked("66:77:88:99:aa:bb",true,"00:11:22:33:44:55");
+              ok(b.success,"block success");
+              ok(f.policy==1 && f.acl.contains("66:77:88:99:aa:bb"),"deny state");
+              ok(!f.acl.contains("00:11:22:33:44:55"),"manager absent from deny list");
+
+              ActionResult u=r.setBlocked("66:77:88:99:aa:bb",false,"00:11:22:33:44:55");
+              ok(u.success,"unblock success");
+              ok(f.policy==0 && f.acl.isEmpty(),"off state");
+
               int before=f.commands.size();
-              Set<String> x=new LinkedHashSet<>(); x.add("66:77:88:99:aa:bb");
-              ok(!r.setBlocked("66:77:88:99:aa:bb",true,"00:11:22:33:44:55").success,"block locked");
-              ok(!r.blockMany(x,"00:11:22:33:44:55").success,"batch locked");
-              ok(!r.enableAllowOnly(x,"00:11:22:33:44:55").success,"allow locked");
-              ok(!r.disableFilter("00:11:22:33:44:55").success,"emergency locked");
-              ok(f.commands.size()==before,"mutation APIs sent zero router commands");
-              System.out.println("PASS safety behavior test");
+              ok(!r.blockMany(Set.of("66:77:88:99:aa:bb"),"00:11:22:33:44:55").success,"batch disabled");
+              ok(!r.enableAllowOnly(Set.of("66:77:88:99:aa:bb"),"00:11:22:33:44:55").success,"allow disabled");
+              ok(f.commands.size()==before,"disabled features sent zero commands");
+
+              ActionResult e=r.disableFilter("00:11:22:33:44:55");
+              ok(e.success && f.policy==0,"emergency open");
+
+              for(String c:f.commands){
+                String x=c.toLowerCase(Locale.ROOT);
+                ok(!x.contains("save")&&!x.contains("reboot")&&!x.contains("reset")&&!x.contains("firmware"),"forbidden command "+c);
+              }
+              System.out.println("PASS safe-control behavior test");
             }
           }
           EOF
-          OUT=/tmp/safety-test-out
+          OUT=/tmp/safe-control-test-out
           rm -rf "$OUT"; mkdir -p "$OUT"
-          javac -encoding UTF-8 -d "$OUT" \
-            $(find "$ROOT/app/src/main/java/org/sayeh/wificontrol/core" -name '*.java' | sort) \
-            /tmp/SafetyLockTest.java
-          java -ea -cp "$OUT" org.sayeh.wificontrol.core.SafetyLockTest
+          javac -encoding UTF-8 -d "$OUT"             $(find "$ROOT/app/src/main/java/org/sayeh/wificontrol/core" -name '*.java' | sort)             /tmp/SafeControlTest.java
+          java -ea -cp "$OUT" org.sayeh.wificontrol.core.SafeControlTest
 
-      - name: Build Safety Lock APK
-        working-directory: /tmp/wificontrol-safe/WiFiControlV6
+      - name: Build APK
+        working-directory: /tmp/wificontrol-safecontrol/WiFiControlV6
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Binary no-write gate and APK validation
+      - name: Binary safety gate and APK validation
         shell: bash
         run: |
           set -euo pipefail
-          APK=/tmp/wificontrol-safe/WiFiControlV6/app/build/outputs/apk/debug/app-debug.apk
+          APK=/tmp/wificontrol-safecontrol/WiFiControlV6/app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
           unzip -t "$APK" >/dev/null
-
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | tee /tmp/safecontrol-badging.txt
+          grep -F "package: name='org.sayeh.wificontrol.safecontrol' versionCode='72' versionName='7.2.0-safe-control-volatile'" /tmp/safecontrol-badging.txt
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/safecontrol-signature.txt
 
-          "$AAPT" dump badging "$APK" | tee /tmp/safe-badging.txt
-          grep -F "package: name='org.sayeh.wificontrol.safe' versionCode='71' versionName='7.1.0-safety-lock'" /tmp/safe-badging.txt
-          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/safe-signature.txt
-
-          mkdir -p /tmp/dexscan
+          rm -rf /tmp/dexscan && mkdir -p /tmp/dexscan
           unzip -q "$APK" 'classes*.dex' -d /tmp/dexscan
-          strings /tmp/dexscan/classes*.dex > /tmp/dex-strings.txt
-          if grep -E 'rt node accesspolicy|rt node acladdentry|rt node save|rt node index' /tmp/dex-strings.txt; then
-            echo "Forbidden router command survived into binary"
+          strings /tmp/dexscan/classes*.dex > /tmp/safecontrol-dex-strings.txt
+
+          if grep -Ei 'rt node save|factory reset|firmware upgrade|reboot' /tmp/safecontrol-dex-strings.txt; then
+            echo "Forbidden persistent/destructive command survived into binary"
             exit 1
           fi
-          grep -F 'rtwlan showmactable' /tmp/dex-strings.txt
-          grep -F 'ip arp status' /tmp/dex-strings.txt
+          grep -F 'rt node index 1' /tmp/safecontrol-dex-strings.txt
+          grep -F 'rt node accesspolicy 0' /tmp/safecontrol-dex-strings.txt
+          grep -F 'rt node acladdentry' /tmp/safecontrol-dex-strings.txt
 
-          sha256sum "$APK" | tee /tmp/SafetyLock-SHA256.txt
-          cp "$APK" /tmp/WiFiControlV7_1-SafetyLock.apk
+          sha256sum "$APK" | tee /tmp/SafeControl-SHA256.txt
+          cp "$APK" /tmp/WiFiControlV7_2-SafeControl.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WiFiControlV7_1-SafetyLock-APK
+          name: WiFiControlV7_2-SafeControl-APK
           path: |
-            /tmp/WiFiControlV7_1-SafetyLock.apk
-            /tmp/SafetyLock-SHA256.txt
-            /tmp/safe-badging.txt
-            /tmp/safe-signature.txt
-            /tmp/dex-strings.txt
+            /tmp/WiFiControlV7_2-SafeControl.apk
+            /tmp/SafeControl-SHA256.txt
+            /tmp/safecontrol-badging.txt
+            /tmp/safecontrol-signature.txt
+            /tmp/safecontrol-dex-strings.txt
           if-no-files-found: error
           retention-days: 7
