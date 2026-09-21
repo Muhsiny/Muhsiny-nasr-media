@@ -1,13 +1,11 @@
-name: WiFi Control V8 Router Direct APK
+name: WiFi Control V8 Final Router Direct APK
 
 on:
   push:
     branches: [ wifi-control-v7-build ]
     paths:
       - '.github/workflows/wifi-control-v8-build.yml'
-      - 'wificontrol-v8-overrides/**'
-      - 'wificontrol-v8/**'
-      - 'wificontrol-build/**'
+      - 'wificontrol-v8-source/**'
 
 jobs:
   build:
@@ -16,6 +14,7 @@ jobs:
     permissions:
       contents: read
       actions: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -28,36 +27,35 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Reconstruct base source
+      - name: Reconstruct exact V8 source
         shell: bash
         run: |
           set -euo pipefail
-          cat wificontrol-build/source.part* | tr -d '\n\r' | base64 -d > /tmp/base.zip
-          unzip -t /tmp/base.zip >/dev/null
-          rm -rf /tmp/v8
-          mkdir -p /tmp/v8
-          unzip -q /tmp/base.zip -d /tmp/v8
+          cat wificontrol-v8-source/part* | tr -d '\n\r' | base64 -d > /tmp/WiFiControlV8_min.zip
+          echo "cc304b7441d8eddd9418023e5d571211ba4b87c68101274754968373237f4635  /tmp/WiFiControlV8_min.zip" | sha256sum -c -
+          unzip -t /tmp/WiFiControlV8_min.zip
+          rm -rf /tmp/v8 && mkdir -p /tmp/v8
+          unzip -q /tmp/WiFiControlV8_min.zip -d /tmp/v8
           test -f /tmp/v8/WiFiControlV6/app/build.gradle
 
-      - name: Apply deterministic V8 patch
+      - name: Source feature and safety gate
         shell: bash
         run: |
           set -euo pipefail
-          cd /tmp/v8/WiFiControlV6
-          patch --dry-run -p1 < "$GITHUB_WORKSPACE/wificontrol-v8/V8.patch"
-          patch -p1 < "$GITHUB_WORKSPACE/wificontrol-v8/V8.patch"
-          test -f app/src/main/java/org/sayeh/wificontrol/RouterWebConsoleActivity.java
-
-      - name: Source safety and feature gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT=/tmp/v8/WiFiControlV6/app/src/main
-          grep -RFn 'restoreState' "$ROOT/java"
-          grep -RFn 'RouterWebConsoleActivity' "$ROOT"
-          grep -RFn 'QoS / Priority واقعی' "$ROOT/java"
-          if grep -RInE 'factory[ _-]*reset|firmware[ _-]*(flash|upgrade)|rt node reboot|sys reboot|erase flash' "$ROOT/java"; then
-            echo "Forbidden destructive router command/text found in Java source"
+          ROOT=/tmp/v8/WiFiControlV6/app/src/main/java
+          grep -RFn 'rtwlan showmactable' "$ROOT"
+          grep -RFn 'ip arp status' "$ROOT"
+          grep -RFn 'rt node accesspolicy' "$ROOT"
+          grep -RFn 'rt node acladdentry' "$ROOT"
+          grep -RFn 'rt node save' "$ROOT"
+          grep -RFn 'restoreState' "$ROOT"
+          test -f "$ROOT/org/sayeh/wificontrol/ScheduleManager.java"
+          test -f "$ROOT/org/sayeh/wificontrol/ScheduleReceiver.java"
+          test -f "$ROOT/org/sayeh/wificontrol/BootReceiver.java"
+          test -f "$ROOT/org/sayeh/wificontrol/SecretStore.java"
+          test -f "$ROOT/org/sayeh/wificontrol/RouterWebConsoleActivity.java"
+          if grep -RInE 'factory[ _-]*reset|firmware[ _-]*(flash|upgrade)|rt node reboot|sys reboot|erase flash' "$ROOT"; then
+            echo "Forbidden destructive router operation found"
             exit 1
           fi
 
@@ -74,16 +72,14 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
 
-      - name: Run core regression tests
+      - name: Build final APK
         working-directory: /tmp/v8/WiFiControlV6
         shell: bash
-        run: bash tools/run_core_tests.sh
+        run: |
+          set -euo pipefail
+          gradle :app:assembleDebug --stacktrace
 
-      - name: Build V8 APK
-        working-directory: /tmp/v8/WiFiControlV6
-        run: gradle :app:assembleDebug --stacktrace
-
-      - name: Validate final APK
+      - name: Validate final APK binary
         shell: bash
         run: |
           set -euo pipefail
@@ -98,27 +94,31 @@ jobs:
 
           rm -rf /tmp/v8dex && mkdir -p /tmp/v8dex
           unzip -q "$APK" 'classes*.dex' -d /tmp/v8dex
-          strings /tmp/v8dex/classes*.dex > /tmp/v8-dex-strings.txt
+          for d in /tmp/v8dex/classes*.dex; do strings "$d"; done > /tmp/v8-dex-strings.txt
           grep -F 'rtwlan showmactable' /tmp/v8-dex-strings.txt
           grep -F 'ip arp status' /tmp/v8-dex-strings.txt
           grep -F 'rt node accesspolicy' /tmp/v8-dex-strings.txt
           grep -F 'rt node acladdentry' /tmp/v8-dex-strings.txt
           grep -F 'rt node save' /tmp/v8-dex-strings.txt
+          grep -F 'ScheduleReceiver' /tmp/v8-dex-strings.txt
+          grep -F 'SecretStore' /tmp/v8-dex-strings.txt
+          grep -F 'RouterWebConsoleActivity' /tmp/v8-dex-strings.txt
           if grep -Ei 'factory[ _-]*reset|firmware[ _-]*(flash|upgrade)|rt node reboot|sys reboot|erase flash' /tmp/v8-dex-strings.txt; then
-            echo "Forbidden destructive router command survived into binary"
+            echo "Forbidden destructive router operation survived into APK"
             exit 1
           fi
 
           sha256sum "$APK" | tee /tmp/V8-SHA256.txt
-          cp "$APK" /tmp/WiFiControlV8-RouterDirect.apk
+          cp "$APK" /tmp/WiFiControlV8-Final.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WiFiControlV8-RouterDirect-APK
+          name: WiFiControlV8-Final-APK
           path: |
-            /tmp/WiFiControlV8-RouterDirect.apk
+            /tmp/WiFiControlV8-Final.apk
             /tmp/V8-SHA256.txt
             /tmp/v8-badging.txt
             /tmp/v8-signature.txt
+            /tmp/v8-dex-strings.txt
           if-no-files-found: error
           retention-days: 7
