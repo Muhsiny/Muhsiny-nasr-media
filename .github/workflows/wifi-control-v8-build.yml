@@ -86,7 +86,7 @@ jobs:
 
           old='''        historyButton=button("تاریخچه عملیات"); root.addView(historyButton);
 
-              statusText=text("آماده برای اتصال",14,true);'''
+        statusText=text("آماده برای اتصال",14,true);'''
           new='''        historyButton=button("تاریخچه عملیات"); root.addView(historyButton);
               LinearLayout tools=horizontal(); advancedButton=button("QoS / کنسول پیشرفته"); diagButton=button("تشخیص شبکه");
               tools.addView(advancedButton,weighted()); tools.addView(diagButton,weighted()); root.addView(tools);
