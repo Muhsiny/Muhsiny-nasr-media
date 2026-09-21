@@ -1,0 +1,74 @@
+name: WiFi Control V7 Pro APK
+
+on:
+  push:
+    branches: [ wifi-control-v7-build ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Reconstruct source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat wificontrol-build/source.part* | tr -d '\n\r' | base64 -d > /tmp/WiFiControlV7Pro_source.zip
+          unzip -t /tmp/WiFiControlV7Pro_source.zip
+          rm -rf /tmp/wificontrol-v7
+          mkdir -p /tmp/wificontrol-v7
+          unzip -q /tmp/WiFiControlV7Pro_source.zip -d /tmp/wificontrol-v7
+          test -f /tmp/wificontrol-v7/WiFiControlV6/app/build.gradle
+
+      - name: Install Android SDK 35
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Regression tests
+        working-directory: /tmp/wificontrol-v7/WiFiControlV6
+        run: bash tools/run_core_tests.sh
+
+      - name: Build debug APK
+        working-directory: /tmp/wificontrol-v7/WiFiControlV6
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Validate APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=/tmp/wificontrol-v7/WiFiControlV6/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | tee /tmp/badging.txt
+          grep -F "package: name='org.sayeh.wificontrol'" /tmp/badging.txt
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/signature.txt
+          sha256sum "$APK" | tee /tmp/SHA256.txt
+          cp "$APK" /tmp/WiFiControlV7Pro.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WiFiControlV7Pro-APK
+          path: |
+            /tmp/WiFiControlV7Pro.apk
+            /tmp/SHA256.txt
+            /tmp/badging.txt
+            /tmp/signature.txt
+          if-no-files-found: error
+          retention-days: 7
