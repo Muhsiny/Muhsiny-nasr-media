@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/wifi-control-v8-build.yml'
       - 'wificontrol-v8-overrides/**'
+      - 'wificontrol-v8/**'
       - 'wificontrol-build/**'
 
 jobs:
@@ -37,148 +38,15 @@ jobs:
           mkdir -p /tmp/v8
           unzip -q /tmp/base.zip -d /tmp/v8
           test -f /tmp/v8/WiFiControlV6/app/build.gradle
-          cp wificontrol-v8-overrides/RouterWebConsoleActivity.java /tmp/v8/WiFiControlV6/app/src/main/java/org/sayeh/wificontrol/
 
-      - name: Apply V8 router-direct changes
+      - name: Apply deterministic V8 patch
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          root=Path('/tmp/v8/WiFiControlV6')
-
-          # RouterController: add verified restore capability.
-          p=root/'app/src/main/java/org/sayeh/wificontrol/core/RouterController.java'
-          s=p.read_text(encoding='utf-8')
-          s=s.replace('    ActionResult disableFilter(String managerMac) throws IOException;\n',
-                      '    ActionResult disableFilter(String managerMac) throws IOException;\n    ActionResult restoreState(int policy, Set<String> acl, String managerMac) throws IOException;\n')
-          p.write_text(s,encoding='utf-8')
-
-          # Router engine: restore a saved policy/ACL through the same verified transaction.
-          p=root/'app/src/main/java/org/sayeh/wificontrol/core/TpLinkCliRouter.java'
-          s=p.read_text(encoding='utf-8')
-          if 'ActionResult restoreState(' not in s:
-              marker='    private ActionResult applyTransaction('
-              if marker not in s: raise SystemExit('TpLink applyTransaction anchor missing')
-              restore='''    @Override public synchronized ActionResult restoreState(int policy, Set<String> acl, String rawManagerMac) throws IOException {
-              if (policy < RouterSnapshot.POLICY_OFF || policy > RouterSnapshot.POLICY_ALLOW)
-                  return ActionResult.fail("Invalid backup policy.", null, null);
-              RouterSnapshot before = probe();
-              return applyTransaction(policy, cleanSet(acl), MacAddress.normalize(rawManagerMac), before,
-                      "Saved safe state restored and verified by router.");
-          }
-
-          '''
-              s=s.replace(marker,restore+marker,1)
-          p.write_text(s,encoding='utf-8')
-
-          # MainActivity V8 UI and direct-router tools.
-          p=root/'app/src/main/java/org/sayeh/wificontrol/MainActivity.java'
-          s=p.read_text(encoding='utf-8')
-          s=s.replace('import android.content.SharedPreferences;\n','import android.content.SharedPreferences;\nimport android.content.Intent;\n')
-          s=s.replace('import java.net.NetworkInterface;\n','import java.net.NetworkInterface;\nimport java.net.InetSocketAddress;\nimport java.net.Socket;\n')
-          s=s.replace('private Button connectButton,refreshButton,allowOnlyButton,emergencyButton,quarantineButton,monitorButton,historyButton;',
-                      'private Button connectButton,refreshButton,allowOnlyButton,emergencyButton,quarantineButton,monitorButton,historyButton,advancedButton,diagButton,backupButton,restoreButton;')
-          s=s.replace('WiFi Control V7 Pro','WiFi Control V8 Router Manager')
-          s=s.replace('کنترل واقعی Router با Verify و محافظت در برابر قفل‌شدن مدیر',
-                      'مستقل از کمپیوتر و کلاد • کنترل مستقیم روتر • Verify / Rollback / QoS Console')
-          s=s.replace('String.valueOf(prefs.getInt("wlan_node",0))','String.valueOf(prefs.getInt("wlan_node",1))')
-
-          old='''        historyButton=button("تاریخچه عملیات"); root.addView(historyButton);
-
-        statusText=text("آماده برای اتصال",14,true);'''
-          new='''        historyButton=button("تاریخچه عملیات"); root.addView(historyButton);
-              LinearLayout tools=horizontal(); advancedButton=button("QoS / کنسول پیشرفته"); diagButton=button("تشخیص شبکه");
-              tools.addView(advancedButton,weighted()); tools.addView(diagButton,weighted()); root.addView(tools);
-              LinearLayout safety=horizontal(); backupButton=button("Backup وضعیت امن"); restoreButton=button("Restore وضعیت امن");
-              safety.addView(backupButton,weighted()); safety.addView(restoreButton,weighted()); root.addView(safety);
-
-              statusText=text("آماده برای اتصال",14,true);'''
-          if old not in s: raise SystemExit('MainActivity buttons anchor missing')
-          s=s.replace(old,new)
-
-          old='''        historyButton.setOnClickListener(v->showHistory());
-              setContentView(scroll); enableControls(false);'''
-          new='''        historyButton.setOnClickListener(v->showHistory());
-              advancedButton.setOnClickListener(v->openAdvanced("",""));
-              diagButton.setOnClickListener(v->runDiagnostics());
-              backupButton.setOnClickListener(v->saveCurrentBackup());
-              restoreButton.setOnClickListener(v->restoreBackup());
-              setContentView(scroll); enableControls(false);'''
-          s=s.replace(old,new)
-
-          s=s.replace('''    private void consume(ActionResult r) {
-              logEvent(r.success?"SUCCESS":"FAILED", r.message);''',
-                      '''    private void consume(ActionResult r) {
-              if(r.before!=null) saveBackup(r.before);
-              logEvent(r.success?"SUCCESS":"FAILED", r.message);''')
-
-          s=s.replace('''        diagnosticText.setText("Policy: "+policyName(s.policy)+"   |   ACL: "+s.acl.size()+"   |   دستگاه‌های فعلی: "+s.devices.size());''',
-                      '''        diagnosticText.setText("Direct CLI: آماده  |  Policy: "+policyName(s.policy)+"  |  ACL: "+s.acl.size()+"  |  Online: "+s.devices.size()+"\\nQoS/Queue: از کنسول واقعی روتر  |  Exact Mbps روی Firmware V4: پشتیبانی رسمی ندارد");''')
-
-          old='''        row.addView(managerButton,weighted()); row.addView(blockButton,weighted()); card.addView(row);
-              return card;'''
-          new='''        row.addView(managerButton,weighted()); row.addView(blockButton,weighted()); card.addView(row);
-              Button qosButton=button("QoS / Priority واقعی برای این IP");
-              qosButton.setEnabled(d.ip!=null&&!d.ip.trim().isEmpty()); qosButton.setOnClickListener(v->openAdvanced(d.ip,d.mac)); card.addView(qosButton);
-              return card;'''
-          if old not in s: raise SystemExit('MainActivity device anchor missing')
-          s=s.replace(old,new)
-
-          marker='''    private void setManager(String rawMac) {'''
-          methods=r'''
-          private void openAdvanced(String ip,String mac){
-              Intent i=new Intent(this,RouterWebConsoleActivity.class); i.putExtra("host",hostInput.getText().toString().trim()); i.putExtra("ip",ip==null?"":ip); i.putExtra("mac",mac==null?"":mac); startActivity(i);
-          }
-
-          private void runDiagnostics(){
-              if(busy) return; final String host=hostInput.getText().toString().trim(); statusText.setText("در حال تست Gateway و پورت‌های مدیریت…");
-              executor.execute(()->{
-                  StringBuilder b=new StringBuilder(); b.append("Router: ").append(host).append('\n');
-                  b.append(testPort(host,23,"Telnet")); b.append('\n').append(testPort(host,80,"Web UI"));
-                  runOnUiThread(()->statusText.setText(b.toString()));
-              });
-          }
-
-          private String testPort(String host,int port,String name){
-              long start=System.nanoTime(); try(Socket sock=new Socket()){ sock.connect(new InetSocketAddress(host,port),1800); long ms=(System.nanoTime()-start)/1_000_000L; return name+": OPEN  •  "+ms+" ms"; }
-              catch(Exception e){ return name+": بسته/غیرقابل‌دسترسی  •  "+clean(e); }
-          }
-
-          private void saveCurrentBackup(){ if(snapshot==null){statusText.setText("ابتدا Router را Refresh کنید.");return;} saveBackup(snapshot); statusText.setText("وضعیت Policy/ACL فعلی به‌عنوان Backup امن ذخیره شد."); }
-
-          private void saveBackup(RouterSnapshot s){
-              if(s==null||s.policy<0) return; StringBuilder a=new StringBuilder(); for(String m:s.acl){if(a.length()>0)a.append(';');a.append(m);} prefs.edit().putInt("safe_policy",s.policy).putString("safe_acl",a.toString()).apply();
-          }
-
-          private void restoreBackup(){
-              if(router==null||busy) return; int p=prefs.getInt("safe_policy",-1); String raw=prefs.getString("safe_acl",""); if(p<0){statusText.setText("Backup امنی ذخیره نشده است.");return;}
-              LinkedHashSet<String> acl=new LinkedHashSet<>(); for(String x:raw.split(";")){String m=MacAddress.normalize(x);if(!m.isEmpty())acl.add(m);}
-              new AlertDialog.Builder(this).setTitle("Restore وضعیت امن").setMessage("Policy/ACL ذخیره‌شده دوباره روی Router اعمال و سپس Verify می‌شود.")
-                      .setNegativeButton("لغو",null).setPositiveButton("Restore",(d,w)->{setBusy(true,"در حال Restore و Verify…"); executor.execute(()->{try{ActionResult r=router.restoreState(p,acl,managerMac);runOnUiThread(()->consume(r));}catch(Throwable e){runOnUiThread(()->fail("Restore ناموفق: "+clean(e)));}});}).show();
-          }
-
-          '''
-          if marker not in s: raise SystemExit('MainActivity method anchor missing')
-          s=s.replace(marker,methods+marker)
-          s=s.replace('''    private void enableControls(boolean enabled){ refreshButton.setEnabled(enabled); allowOnlyButton.setEnabled(enabled); emergencyButton.setEnabled(enabled); quarantineButton.setEnabled(enabled); }''',
-                      '''    private void enableControls(boolean enabled){ refreshButton.setEnabled(enabled); allowOnlyButton.setEnabled(enabled); emergencyButton.setEnabled(enabled); quarantineButton.setEnabled(enabled); backupButton.setEnabled(enabled); restoreButton.setEnabled(enabled); advancedButton.setEnabled(true); diagButton.setEnabled(true); }''')
-          p.write_text(s,encoding='utf-8')
-
-          # App identity and manifest.
-          p=root/'app/build.gradle'
-          s=p.read_text(encoding='utf-8').replace("applicationId 'org.sayeh.wificontrol'","applicationId 'org.sayeh.wificontrol.v8'").replace('versionCode 70','versionCode 80').replace("versionName '7.0.0-real-control'","versionName '8.0.0-router-direct'")
-          p.write_text(s,encoding='utf-8')
-
-          p=root/'app/src/main/AndroidManifest.xml'
-          s=p.read_text(encoding='utf-8').replace('android:label="WiFi Control V7 Pro"','android:label="WiFi Control V8 Router Manager"')
-          s=s.replace('android:allowBackup="false"','android:allowBackup="false"\n        android:usesCleartextTraffic="true"')
-          s=s.replace('''        <activity
-              android:name=".MainActivity"''','''        <activity android:name=".RouterWebConsoleActivity" android:exported="false" android:screenOrientation="portrait" />
-          <activity
-              android:name=".MainActivity"''')
-          p.write_text(s,encoding='utf-8')
-          PY
+          cd /tmp/v8/WiFiControlV6
+          patch --dry-run -p1 < "$GITHUB_WORKSPACE/wificontrol-v8/V8.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/wificontrol-v8/V8.patch"
+          test -f app/src/main/java/org/sayeh/wificontrol/RouterWebConsoleActivity.java
 
       - name: Source safety and feature gate
         shell: bash
