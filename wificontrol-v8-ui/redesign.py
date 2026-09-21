@@ -133,7 +133,7 @@ new_build = r'''    private void buildUi() {
     }'''
 
 pattern = r"    private void buildUi\(\) \{.*?\n    \}\n\n    private void connectReal\(\)"
-s, n = re.subn(pattern, new_build + "\n\n    private void connectReal()", s, count=1, flags=re.S)
+s, n = re.subn(pattern, lambda m: new_build + "\n\n    private void connectReal()", s, count=1, flags=re.S)
 if n != 1:
     raise SystemExit("buildUi replacement failed")
 
@@ -205,7 +205,7 @@ new_card = r'''    private View deviceCard(Device d,RouterSnapshot s) {
     }'''
 
 pattern = r"    private View deviceCard\(Device d,RouterSnapshot s\) \{.*?\n    \}\n\n\n    private void openAdvanced"
-s, n = re.subn(pattern, new_card + "\n\n    private void openAdvanced", s, count=1, flags=re.S)
+s, n = re.subn(pattern, lambda m: new_card + "\n\n    private void openAdvanced", s, count=1, flags=re.S)
 if n != 1:
     raise SystemExit("deviceCard replacement failed")
 
