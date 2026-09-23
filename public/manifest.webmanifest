@@ -1,0 +1,14 @@
+{
+  "name": "NASR MEDIA",
+  "short_name": "NASR",
+  "description": "رسانه مستقل، منبع‌دار و چندزبانه",
+  "lang": "fa-AF",
+  "dir": "rtl",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f3f5f2",
+  "theme_color": "#082b20",
+  "icons": [
+    {"src":"./favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}
+  ]
+}
