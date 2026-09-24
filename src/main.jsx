@@ -17,6 +17,7 @@ const EMPTY_NEWS = [{
   confidence_score: 100,
   source_name: 'NASR MEDIA',
   source_url: '',
+  original_url: '',
   status: 'published'
 }];
 
@@ -189,7 +190,7 @@ function App() {
             <div className="meta-row"><span>{lead.category || 'خبر'}</span><time>{fmtDate(lead.published_at || lead.created_at)}</time></div>
             <h1>{lead.title}</h1>
             <p>{lead.summary}</p>
-            <div className="source-line"><Link2 size={14} /> {lead.source_name || 'NASR MEDIA'} <span>•</span> اعتبار {lead.confidence_score ?? '—'}٪</div>
+            <div className="source-line"><Link2 size={14} /> {lead.source_name || lead.image_credit || 'NASR MEDIA'} <span>•</span> اعتبار {lead.confidence_score ?? '—'}٪</div>
           </div>
         </article>
 
@@ -219,7 +220,7 @@ function App() {
             <div className="card-time"><Clock3 size={13} /> {fmtDate(item.published_at || item.created_at)}</div>
             <h3>{item.title}</h3>
             <p>{item.summary}</p>
-            <div className="card-footer"><span>{item.source_name || 'NASR MEDIA'}</span><button>بخوانید <ArrowLeft size={15} /></button></div>
+            <div className="card-footer"><span>{item.source_name || item.image_credit || 'NASR MEDIA'}</span><button>بخوانید <ArrowLeft size={15} /></button></div>
           </div>
         </article>) : <div className="no-results">برای این جست‌وجو خبری پیدا نشد.</div>}
       </section>
@@ -247,8 +248,8 @@ function App() {
           <p className="reader-summary">{reader.summary}</p>
           {readerLoading ? <p className="loading-line">در حال دریافت متن کامل…</p> : <div className="reader-body">{(reader.body || '').split('\n').map((line, i) => line ? <p key={i}>{line}</p> : <br key={i} />)}</div>}
           <div className="source-box">
-            <div><ShieldCheck size={20} /><span><strong>منبع ثبت‌شده</strong><small>{reader.source_name || 'NASR MEDIA'}</small></span></div>
-            {reader.source_url && <a href={reader.source_url} target="_blank" rel="noreferrer">مشاهده منبع اصلی <ExternalLink size={15} /></a>}
+            <div><ShieldCheck size={20} /><span><strong>منبع ثبت‌شده</strong><small>{reader.source_name || reader.image_credit || 'NASR MEDIA'}</small></span></div>
+            {(reader.source_url || reader.original_url) && <a href={reader.source_url || reader.original_url} target="_blank" rel="noreferrer">مشاهده منبع اصلی <ExternalLink size={15} /></a>}
           </div>
         </div>
       </article>
