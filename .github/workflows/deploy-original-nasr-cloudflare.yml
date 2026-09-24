@@ -1,0 +1,152 @@
+name: Deploy Original NASR to Cloudflare
+
+on:
+  push:
+    branches: [nasr-cloudflare-original]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CF_API_TOKEN || secrets.CLOUDFLARE_TOKEN || secrets.NASR_CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: 49e1ddcb14026517ec2d0b255f974e9f
+  NASR_OWNER_EMAIL: sjzjan420@gmail.com
+  DB_NAME: nasr-media-original-db
+  R2_NAME: nasr-media-original-media
+  WORKER_NAME: nasr-media-original
+  ACCOUNT_SUBDOMAIN: com14
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify Cloudflare credential
+        shell: bash
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN is not configured."
+            exit 2
+          fi
+          curl -fsS https://api.cloudflare.com/client/v4/user/tokens/verify             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq -e '.success == true' >/dev/null
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Provision D1 and R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          DB_LIST="$(npx wrangler d1 list --json)"
+          DB_ID="$(printf '%s' "$DB_LIST" | jq -r --arg n "$DB_NAME" '.[] | select(.name==$n) | (.uuid // .id // .database_id)' | head -n1)"
+          if [ -z "$DB_ID" ] || [ "$DB_ID" = "null" ]; then
+            CREATE_OUT="$(npx wrangler d1 create "$DB_NAME" --json 2>&1 || true)"
+            DB_ID="$(printf '%s' "$CREATE_OUT" | jq -r '(.uuid // .id // .database_id // empty)' 2>/dev/null || true)"
+            if [ -z "$DB_ID" ]; then DB_ID="$(printf '%s' "$CREATE_OUT" | grep -Eo '[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,36}' | head -n1)"; fi
+          fi
+          if [ -z "$DB_ID" ]; then echo "Unable to resolve D1 database id"; exit 3; fi
+          sed -i "s/00000000-0000-0000-0000-000000000000/$DB_ID/g" wrangler.toml wrangler.production.toml
+
+          R2_LIST="$(npx wrangler r2 bucket list --json 2>/dev/null || echo '[]')"
+          if ! printf '%s' "$R2_LIST" | jq -e --arg n "$R2_NAME" '.[] | select((.name // .bucket_name)==$n)' >/dev/null 2>&1; then
+            npx wrangler r2 bucket create "$R2_NAME"
+          fi
+
+      - name: Build exact original NASR frontend
+        run: npm run build
+
+      - name: Deploy and verify staging Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config wrangler.toml
+          if ! npx wrangler secret list --config wrangler.toml --json 2>/dev/null | jq -e '.[] | select(.name=="AUTH_SECRET")' >/dev/null 2>&1; then
+            openssl rand -hex 32 | npx wrangler secret put AUTH_SECRET --config wrangler.toml
+            npx wrangler deploy --config wrangler.toml
+          fi
+          STAGING="https://$WORKER_NAME.$ACCOUNT_SUBDOMAIN.workers.dev/api/_healthcheck"
+          for i in $(seq 1 24); do
+            if curl -fsS --max-time 15 "$STAGING" | jq -e '.message=="Success"' >/dev/null 2>&1; then
+              echo "Staging NASR is healthy."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Staging health check failed."
+          exit 4
+
+      - name: Configure secure owner login with Cloudflare Access
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4"
+          H=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json")
+
+          IDPS="$(curl -fsS "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/access/identity_providers" "${H[@]}")"
+          IDP_ID="$(printf '%s' "$IDPS" | jq -r '.result[]? | select(.type=="onetimepin") | .id' | head -n1)"
+          if [ -z "$IDP_ID" ]; then
+            CREATED="$(curl -fsS -X POST "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/access/identity_providers" "${H[@]}"               --data '{"name":"NASR MEDIA One-time PIN","type":"onetimepin","config":{}}')"
+            IDP_ID="$(printf '%s' "$CREATED" | jq -r '.result.id')"
+          fi
+
+          APPS="$(curl -fsS "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps?per_page=100" "${H[@]}")"
+          APP_ID="$(printf '%s' "$APPS" | jq -r '.result[]? | select(.domain=="nasr-media.un-beha.org/admin-login") | .id' | head -n1)"
+          if [ -z "$APP_ID" ]; then
+            BODY="$(jq -nc --arg idp "$IDP_ID" '{name:"NASR MEDIA Admin Login",type:"self_hosted",domain:"nasr-media.un-beha.org/admin-login",session_duration:"8h",allowed_idps:[$idp],auto_redirect_to_identity:true,app_launcher_visible:false}')"
+            CREATED="$(curl -fsS -X POST "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps" "${H[@]}" --data "$BODY")"
+            APP_ID="$(printf '%s' "$CREATED" | jq -r '.result.id')"
+          fi
+
+          POLICIES="$(curl -fsS "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$APP_ID/policies" "${H[@]}")"
+          if ! printf '%s' "$POLICIES" | jq -e '.result[]? | select(.name=="NASR owner email")' >/dev/null; then
+            BODY="$(jq -nc --arg email "$NASR_OWNER_EMAIL" '{name:"NASR owner email",decision:"allow",include:[{email:{email:$email}}],session_duration:"8h"}')"
+            curl -fsS -X POST "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$APP_ID/policies" "${H[@]}" --data "$BODY" | jq -e '.success==true' >/dev/null
+          fi
+
+      - name: Cut nasr-media.un-beha.org from AppDeploy to Cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4"
+          AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json")
+          ZONE_ID="$(curl -fsS "$API/zones?name=un-beha.org" "${AUTH[@]}" | jq -r '.result[0].id')"
+          if [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ]; then echo "un-beha.org zone not found"; exit 5; fi
+
+          curl -fsS "$API/zones/$ZONE_ID/dns_records?name=nasr-media.un-beha.org&per_page=100" "${AUTH[@]}" > /tmp/old-dns.json
+
+          restore_old(){
+            echo "Restoring previous NASR DNS..."
+            curl -fsS "$API/zones/$ZONE_ID/dns_records?name=nasr-media.un-beha.org&per_page=100" "${AUTH[@]}"               | jq -r '.result[].id' | while read -r id; do [ -n "$id" ] && curl -fsS -X DELETE "$API/zones/$ZONE_ID/dns_records/$id" "${AUTH[@]}" >/dev/null || true; done
+            jq -c '.result[] | {type,name,content,ttl,proxied}' /tmp/old-dns.json | while read -r rec; do
+              curl -fsS -X POST "$API/zones/$ZONE_ID/dns_records" "${AUTH[@]}" --data "$rec" >/dev/null || true
+            done
+          }
+
+          curl -fsS "$API/zones/$ZONE_ID/dns_records?name=nasr-media.un-beha.org&per_page=100" "${AUTH[@]}"             | jq -r '.result[].id' | while read -r id; do [ -n "$id" ] && curl -fsS -X DELETE "$API/zones/$ZONE_ID/dns_records/$id" "${AUTH[@]}" >/dev/null; done
+
+          if ! npx wrangler deploy --config wrangler.production.toml; then
+            restore_old
+            exit 6
+          fi
+
+          OK=0
+          for i in $(seq 1 36); do
+            if curl -fsS --max-time 15 "https://nasr-media.un-beha.org/api/_healthcheck" | jq -e '.message=="Success"' >/dev/null 2>&1; then OK=1; break; fi
+            sleep 5
+          done
+          if [ "$OK" -ne 1 ]; then
+            npx wrangler deploy --config wrangler.toml || true
+            restore_old
+            exit 7
+          fi
+
+      - name: Remove obsolete wrong NASR Worker only after successful cutover
+        shell: bash
+        run: |
+          npx wrangler delete nasr-media --force || true
+          echo "Original NASR is live on nasr-media.un-beha.org; obsolete wrong Worker removal attempted."
