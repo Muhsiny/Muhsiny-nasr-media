@@ -1,0 +1,68 @@
+# Tests
+
+## Test 1 - بارگذاری، جست‌وجوی آرشیف و بازکردن خبر [sanity]
+Viewport: mobile
+Covers: GET /api/articles lightweight feed, GET /api/search archive search, GET /api/articles/:id full detail, custom-domain share route
+Description: صفحهٔ عمومی باید سبک باز شود، جست‌وجو در موبایل به آرشیف متصل باشد و متن کامل فقط هنگام بازکردن خبر دریافت شود.
+
+Steps:
+1. صفحهٔ اصلی را باز کن و یک واژهٔ موجود در یکی از خبرهای قدیمی‌تر را در جست‌وجو بنویس
+2. یک نتیجه را باز کن
+3. لینک اشتراک همان خبر را بررسی کن
+
+Expected: نتیجهٔ جست‌وجو نمایش داده شود، خبر بازشده متن کامل داشته باشد و لینک اشتراک از مسیر https://nasr-media.un-beha.org/share/... استفاده کند.
+
+## Test 2 - تصویر وابسته به همان خبر و جلوگیری از نشر دبل
+Viewport: desktop
+Covers: trusted article-bound image selection, exact-title dedupe across URL/queue/recent/save, duplicate approval guard, bounded automatic retry
+Description: خبر خودکار نباید از میان تصاویر نامرتبط صفحه عکس حدسی بردارد و یک عنوان یکسان نباید دوباره به‌عنوان خبر تازه نشر شود.
+
+Setup:
+1. با حساب مدیر یک خبر آزمایشی با عنوان ثابت، متن کافی و تصویر معتبر ایجاد و نشر کن
+2. پیش‌نویس دوم را با همان عنوان ولی شناسه/لینک منبع متفاوت ایجاد کن
+
+Steps:
+1. تلاش کن پیش‌نویس دوم را نشر کنی
+2. صفحهٔ عمومی را Refresh کن و عنوان ثابت را جست‌وجو کن
+3. پس از یک اجرای خودکار، یکی از خبرهای تازهٔ منبع را باز کن و تصویر آن را با همان صفحهٔ منبع مقایسه کن
+
+Expected: نشر دوم با خطای duplicate_title_already_published رد شود؛ در خروجی عمومی فقط یک نسخه از عنوان ثابت دیده شود؛ و خبر خودکار فقط تصویر متصل به همان مقاله از NewsArticle/OG/Twitter/RSS داشته باشد و در نبود تصویر معتبر برای retry بماند.
+
+## Test 3 - همگام‌سازی حذف، رد، ویرایش و بازگردانی
+Viewport: desktop
+Covers: POST /api/admin/articles/update, delete, restore, reject, recent/public mirror consistency
+Description: وضعیت master article و فید عمومی نباید از هم جدا شوند.
+
+Setup:
+1. با حساب مدیر یک پیش‌نویس آزمایشی با تصویر معتبر ایجاد و نشر کن
+
+Steps:
+1. مطلب را ویرایش کن و صفحهٔ عمومی را Refresh کن
+2. مطلب را حذف کن و مطمئن شو از خروجی عمومی ناپدید می‌شود
+3. از فهرست «همه خبرها» آن را بازگردان و وضعیتش را دوباره بررسی کن
+
+Expected: ویرایش منتشرشده در عمومی دیده شود؛ حذف/رد فوراً از فید عمومی برداشته شود؛ بازگردانی آن را به draft برگرداند و بدون نشر مجدد عمومی نشود.
+
+## Test 4 - لوگو، تصویر و ویدیو با مسیر پایدار
+Viewport: desktop
+Covers: storage upload path persistence, GET /api/settings signed logo refresh, hydrated image/video URLs
+Description: فایل‌های آپلودشده باید با path ذخیره شوند تا با انقضای URL امضاشده از کار نیفتند.
+
+Steps:
+1. با حساب مدیر یک لوگوی جدید ذخیره کن
+2. یک خبر با تصویر و ویدیوی آپلودی ذخیره کن
+3. صفحه را Refresh کن و همان خبر و تنظیمات را دوباره باز کن
+
+Expected: لوگو، تصویر و ویدیو پس از Refresh همچنان قابل نمایش باشند و path ذخیره‌شده باعث تولید URL معتبر تازه شود.
+
+## Test 5 - ترجمهٔ cache شده، منابع واقعی و حفاظت endpointها
+Viewport: desktop
+Covers: POST /api/edition supported-language cache, source per-feed health, protected newsroom selfchecks, social custom-domain URLs
+Description: ترجمه‌های عمومی نباید با هر کلیک دوباره تولید شوند و وضعیت دو منبع باید جداگانه قابل مشاهده باشد.
+
+Steps:
+1. یکی از زبان‌های پشتیبانی‌شده را انتخاب کن، سپس به دری برگرد و همان زبان را دوباره انتخاب کن
+2. با حساب مدیر بخش منابع را باز کن و Ariana News و BBC فارسی را بررسی کن
+3. بدون ورود تلاش کن endpoint اجرایی newsroom را باز کنی
+
+Expected: نسخهٔ زبان دوباره از cache همان fingerprint استفاده کند؛ هر دو منبع زمان/وضعیت جداگانه داشته باشند؛ و endpoint اجرایی برای مخاطب ناشناس مجاز نباشد.

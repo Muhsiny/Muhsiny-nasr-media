@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://nasr-media.un-beha.org/sitemap.xml

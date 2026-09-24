@@ -1,0 +1,1 @@
+[{"name":"nasr-ariana-news","cron":"*/5 * * * *","handler":"runArianaEveryFiveMinutes","timezone":"Asia/Kabul"},{"name":"nasr-analysis-hourly","cron":"7 * * * *","handler":"runAnalysisHourly","timezone":"Asia/Kabul"}]

@@ -1,14 +1,1 @@
-{
-  "name": "NASR MEDIA",
-  "short_name": "NASR",
-  "description": "رسانه مستقل، منبع‌دار و چندزبانه",
-  "lang": "fa-AF",
-  "dir": "rtl",
-  "start_url": "./",
-  "display": "standalone",
-  "background_color": "#f3f5f2",
-  "theme_color": "#082b20",
-  "icons": [
-    {"src":"./favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}
-  ]
-}
+{"name":"NASR MEDIA","short_name":"NASR","description":"خبر، گزارش و تحلیل چندزبانه با دسترسی آفلاین","lang":"fa","dir":"rtl","start_url":"./","scope":"./","display":"standalone","background_color":"#f5f5f4","theme_color":"#064e3b","icons":[{"src":"./resources/nasr-logo.png","sizes":"any","type":"image/png","purpose":"any maskable"}]}
