@@ -1,0 +1,52 @@
+name: NASR Publish Now
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-now.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      INGEST_KEY: ${{ secrets.INGEST_KEY || secrets.NASR_INGEST_KEY || secrets.NASR_MEDIA_INGEST_KEY }}
+    steps:
+      - name: Verify publish credential exists
+        shell: bash
+        run: |
+          if [ -z "$INGEST_KEY" ]; then
+            echo "No NASR ingestion secret is configured in this repository."
+            exit 2
+          fi
+
+      - name: Trigger official newsroom ingestion
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/ingest.json -w "%{http_code}" \
+            -X POST "https://nasr-media.com14.workers.dev/api/ingest" \
+            -H "content-type: application/json" \
+            -H "x-ingest-key: $INGEST_KEY")
+          cat /tmp/ingest.json
+          echo
+          test "$code" = "200"
+
+      - name: Verify live published feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://nasr-media.com14.workers.dev/api/articles?status=published&language=fa&limit=20" -o /tmp/articles.json
+          python - <<'PY'
+          import json
+          rows=json.load(open('/tmp/articles.json',encoding='utf-8'))
+          print("published_count_returned=",len(rows))
+          for row in rows[:8]:
+              print(row.get("published_at"), "|", row.get("title"))
+          if not rows:
+              raise SystemExit("No published stories returned")
+          PY
