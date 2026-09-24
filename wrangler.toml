@@ -1,0 +1,29 @@
+name = "nasr-media-original"
+account_id = "49e1ddcb14026517ec2d0b255f974e9f"
+main = "cloudflare/worker.ts"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nasr-media-original-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "nasr-media-original-media"
+
+[ai]
+binding = "AI"
+
+[triggers]
+crons = ["*/5 * * * *", "7 * * * *"]
+
+[vars]
+PUBLIC_ORIGIN = "https://nasr-media.un-beha.org"
+AI_MODEL = "@cf/zai-org/glm-4.7-flash"
