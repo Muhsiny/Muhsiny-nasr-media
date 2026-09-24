@@ -1,4 +1,4 @@
-name: Probe Original NASR AppDeploy API
+name: Probe Original NASR Backend Direct
 on:
   push:
     branches: [nasr-original-appdeploy]
@@ -8,13 +8,13 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe original APIs
+      - name: Probe direct AppDeploy backend
         shell: bash
         run: |
           set +e
-          for u in             "https://nasr-media.un-beha.org/api/articles"             "https://nasr-media.un-beha.org/api/settings"             "https://9fa07d2490ea176ad3.v2.appdeploy.ai/api/articles"             "https://9fa07d2490ea176ad3.v2.appdeploy.ai/api/settings"; do
+          for u in             "https://api-v2.appdeploy.ai/app/9fa07d2490ea176ad3/api/articles"             "https://api-v2.appdeploy.ai/app/9fa07d2490ea176ad3/api/settings"             "https://api-v2.appdeploy.ai/app/9fa07d2490ea176ad3/api/offline-pack"             "https://api-v2.appdeploy.ai/app/9fa07d2490ea176ad3/_warmup"; do
             echo "=== $u ==="
-            curl -sS -i -L --max-time 20 "$u" | head -c 4000
+            curl -sS -i -L --max-time 25 "$u" | head -c 12000
             echo
           done
           exit 0
