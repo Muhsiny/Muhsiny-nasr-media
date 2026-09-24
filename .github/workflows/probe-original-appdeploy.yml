@@ -1,0 +1,20 @@
+name: Probe Original NASR AppDeploy API
+on:
+  push:
+    branches: [nasr-original-appdeploy]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe original APIs
+        shell: bash
+        run: |
+          set +e
+          for u in             "https://nasr-media.un-beha.org/api/articles"             "https://nasr-media.un-beha.org/api/settings"             "https://9fa07d2490ea176ad3.v2.appdeploy.ai/api/articles"             "https://9fa07d2490ea176ad3.v2.appdeploy.ai/api/settings"; do
+            echo "=== $u ==="
+            curl -sS -i -L --max-time 20 "$u" | head -c 4000
+            echo
+          done
+          exit 0
