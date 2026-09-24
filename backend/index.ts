@@ -1,4 +1,4 @@
-import{router,json,error,db,ai,storage,requireAuth}from'@appdeploy/sdk';
+import{router,json,error,db,ai,storage,requireAuth}from'./cloudflare-sdk';
 
 const ROOT='sjzjan420@gmail.com';
 const PUBLIC_EDITOR='نصر مدیا';
