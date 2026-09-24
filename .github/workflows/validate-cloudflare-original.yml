@@ -16,3 +16,4 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: npx wrangler deploy --dry-run --config wrangler.toml
+      - run: npx wrangler deploy --dry-run --config wrangler.production.toml
